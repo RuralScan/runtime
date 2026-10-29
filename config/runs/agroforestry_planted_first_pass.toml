@@ -1,0 +1,25 @@
+# One file = one run's decisions. The package itself is pinned in upstream/PIN.json.
+# Empty values are open decisions; plan() reports them as holds. Do not fill in a value
+# that has not been decided: leave it empty and keep the unknowns explicit.
+
+[run]
+nbs_id = "agroforestry"
+system = "planted_silvoarable"
+policy_id = "planted_terrain_soil_v1"   # approved by Pete 2026-10-27 (CIAT issue #455)
+
+[target]
+country = "HTI"                  # Haiti was the proposed AOI; naming it does not approve transfer
+aoi_source = ""                  # exact boundary and where it comes from
+applicability_decision = ""      # decision reference for using the India pools in the target
+
+[soil]
+input_proposal = "planted_topsoil_0_30_v1"   # SoilGrids 0-30 cm; unselected until recorded here
+adopted = false
+decision_reference = ""
+
+[masks]
+legal_mask_spec = ""             # assessed rule and coverage; IUCN categories alone are not enough
+
+[host_inputs]
+# class 30 (grassland) needs a documented local source; leave empty to keep it unknown
+managed_forage_without_grazing = ""

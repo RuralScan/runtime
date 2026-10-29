@@ -4,7 +4,7 @@ __pycache__/
 .env
 .pytest_cache/
 .ruff_cache/
-runs/
+/runs/
 *.tif
 *.zip
 .ipynb_checkpoints/
