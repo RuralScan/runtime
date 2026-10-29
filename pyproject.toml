@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nbs-ruralscan-runtime"
+version = "0.0.1"
+description = "Runtime for NbS Rural Scan: reads CIAT's generated T4 developer package and runs the pipeline."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []                      # core logic is pure Python on purpose
+
+[project.optional-dependencies]
+geo = ["numpy", "rasterio", "xarray", "rioxarray"]
+gee = ["earthengine-api"]
+hf  = ["huggingface_hub"]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests", "scripts"]
