@@ -82,8 +82,8 @@ median and a 5 to 95% range next to CIAT's own index. It does not replace CIAT's
 only then averaged to the grid (in stages, because Earth Engine limits one aggregation to 32 x 32 input pixels);
 soil is SoilGrids at 0-5, 5-15 and 15-30 cm, converted once (dg/kg x 0.1; pH x 0.1) and weighted by layer thickness;
 the host gate uses WorldCover class shares per cell. Missing values stay unknown: nothing is filled with a mean.
-That module needs an authenticated Earth Engine session and is not tested offline: run
-`python scripts/check_gee.py --project <id>` on a tiny area first and read the numbers.
+That module needs an authenticated Earth Engine session and is not tested offline: the notebook's quick check
+(section 3a) pulls a small box and maps every layer first, so each variable is read by eye before the full run.
 
 `firstpass.py` computes CIAT's partial terrain-and-soil index over the rasters, and `compare.py` / `viz.py` put the
 ordinal simulation next to it. Two modes: `policy` (every decision recorded; today every cell would be unknown

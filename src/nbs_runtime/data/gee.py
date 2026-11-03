@@ -11,8 +11,8 @@ It follows DATASET_INPUTS.md (developer-v0.1.5):
 
 Masked or missing values come back as NaN (unknown). Nothing is filled with a mean or a mode.
 
-NOT TESTED OFFLINE: this module needs earthengine-api, xee and an authenticated session. Run
-`python scripts/check_gee.py` on a tiny area first and read the numbers it prints.
+NOT TESTED OFFLINE: this module needs earthengine-api, xee and an authenticated session. The notebook's
+quick check (section 3a) pulls a small box and maps every layer, so read it before a full run.
 """
 from __future__ import annotations
 

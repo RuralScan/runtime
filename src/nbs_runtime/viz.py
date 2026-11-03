@@ -54,3 +54,35 @@ def plot_comparison(fp: FirstPass, comp: Comparison, grid: Grid, title: str,
     if out_path is not None:
         fig.savefig(out_path, dpi=150)
     return fig
+
+
+def plot_layers(layers, grid: Grid, title: str, out_path: Path | None = None):
+    """One map per input layer, so each variable can be checked by eye before it enters the index."""
+    import matplotlib.pyplot as plt
+
+    if layers.synthetic:
+        title = "SYNTHETIC TEST: " + title
+    extent = grid.extent
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8.0))
+    unknown_any = np.isnan(layers.slope_deg) | np.isnan(layers.soc_g_kg) | np.isnan(layers.ph)
+    panels = [
+        (layers.slope_deg, "Slope (degrees)", "terrain", None, None),
+        (layers.soc_g_kg, "Soil organic carbon, 0-30 cm (g/kg)", "copper", None, None),
+        (layers.ph, "Soil pH, 0-30 cm", "RdYlGn", 4.0, 9.0),
+        (layers.eligible_fraction, "Host-eligible share of each cell", "Greens", 0.0, 1.0),
+        (layers.unknown_fraction, "Unknown-host share of each cell", "Greys", 0.0, 1.0),
+        (unknown_any.astype(float), "Cells with an unknown slope, SOC or pH", "Reds", 0.0, 1.0),
+    ]
+    for ax, (data, name, cmap, vmin, vmax) in zip(axes.ravel(), panels, strict=True):
+        cm = plt.get_cmap(cmap).with_extremes(bad="#d9d9d9")
+        im = ax.imshow(np.ma.masked_invalid(data), cmap=cm, vmin=vmin, vmax=vmax, extent=extent, origin="upper")
+        ax.set_title(name, fontsize=11)
+        ax.set_xlabel("longitude")
+        plt.colorbar(im, ax=ax, fraction=0.046)
+    fig.suptitle(title, fontsize=14, fontweight="bold")
+    if layers.synthetic:
+        fig.text(0.5, 0.005, "SYNTHETIC DATA: pipeline test, not real", ha="center", fontsize=9, color="#444444")
+    fig.tight_layout(rect=(0, 0.03, 1, 0.96))
+    if out_path is not None:
+        fig.savefig(out_path, dpi=150)
+    return fig

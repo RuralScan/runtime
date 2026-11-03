@@ -31,8 +31,8 @@ settings, data source). It builds the run configuration, prints what is on hold,
 synthetic data to test the pipeline), computes CIAT's partial terrain-and-soil index, runs the ordinal simulation,
 compares both on maps and saves everything with a manifest to `runs/<fingerprint>/`.
 
-Earth Engine: `pip install -e ".[gee,viz]"`, authenticate once, then check the adapter on a tiny area with
-`python scripts/check_gee.py --project <your-project>` before a full run.
+Earth Engine: `pip install -e ".[gee,viz]"` and authenticate once. The notebook has an optional quick check
+(section 3a) that pulls a small box and maps each layer before the full run.
 
 ## How it connects to CIAT
 

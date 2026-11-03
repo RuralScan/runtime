@@ -80,3 +80,12 @@ def test_aggregation_stages_respect_earth_engines_limit():
 def test_soilgrids_band_names():
     assert gee.soilgrids_band("soc", "0-5") == "soc_0-5cm_mean"
     assert gee.soilgrids_band("phh2o", "15-30") == "phh2o_15-30cm_mean"
+
+
+def test_layer_maps_are_written(tmp_path):
+    pytest.importorskip("matplotlib")
+    from nbs_runtime.viz import plot_layers
+
+    out = tmp_path / "layers.png"
+    plot_layers(synthetic_layers(GRID, seed=3), GRID, "SYNTHETIC test", out)
+    assert out.exists() and out.stat().st_size > 10_000
