@@ -1,3 +1,5 @@
+import itertools
+
 import pytest
 
 np = pytest.importorskip("numpy")
@@ -89,3 +91,57 @@ def test_layer_maps_are_written(tmp_path):
     out = tmp_path / "layers.png"
     plot_layers(synthetic_layers(GRID, seed=3), GRID, "SYNTHETIC test", out)
     assert out.exists() and out.stat().st_size > 10_000
+
+
+# ---- request tiling: the fix for "User memory limit exceeded" ----
+
+def test_grid_windows_stay_aligned_with_the_global_grid():
+    w = GRID.window(10, 20, 5, 30)
+    assert w.shape == (10, 25) and w.resolution_deg == GRID.resolution_deg
+    assert w.crs_transform[2] == pytest.approx(GRID.crs_transform[2] + 5 * GRID.resolution_deg)
+    assert w.crs_transform[5] == pytest.approx(GRID.crs_transform[5] - 10 * GRID.resolution_deg)
+    assert GRID.window(0, GRID.height, 0, GRID.width).crs_transform == pytest.approx(GRID.crs_transform)
+
+
+@pytest.mark.parametrize("native", [gee.SRTM_NATIVE_DEG, gee.SOILGRIDS_NATIVE_DEG, gee.WORLDCOVER_NATIVE_DEG])
+def test_tiles_cover_the_grid_exactly_once_and_respect_the_pixel_budget(native):
+    tiles = gee.tile_plan(GRID, native)
+    cover = np.zeros(GRID.shape, dtype=int)
+    for r0, r1, c0, c1 in tiles:
+        cover[r0:r1, c0:c1] += 1
+        side = max(r1 - r0, c1 - c0)
+        px_per_cell = max(1.0, (GRID.resolution_deg / native) ** 2)
+        assert side <= gee.MAX_TILE_CELLS
+        assert side == 1 or side * side * px_per_cell <= gee.MAX_TILE_INPUT_PIXELS * 1.0001
+    assert (cover == 1).all()
+
+
+def test_heavier_inputs_get_smaller_tiles():
+    slope = gee.tile_plan(GRID, gee.SRTM_NATIVE_DEG)
+    host = gee.tile_plan(GRID, gee.WORLDCOVER_NATIVE_DEG)
+    soil = gee.tile_plan(GRID, gee.SOILGRIDS_NATIVE_DEG)
+    assert len(host) > len(slope) > len(soil)
+
+
+@pytest.mark.parametrize("ratio", [33, 161.7, 500, 5000, 100_000])
+def test_aggregation_stages_nest_in_whole_steps(ratio):
+    native = 1.0
+    stages = gee.aggregation_stages(native, native * ratio)
+    assert stages[-1] == pytest.approx(ratio)
+    assert 1.0 <= stages[0] / native <= 32.0 + 1e-9
+    for prev, cur in itertools.pairwise(stages):
+        step = cur / prev
+        assert step <= 32.0 + 1e-9 and step == pytest.approx(round(step))
+
+
+def test_stitching_tiles_gives_the_same_array_as_one_request(monkeypatch):
+    def field(grid):
+        lon, lat = grid.cell_centres()
+        return np.add.outer(lat * 3.0, lon * 7.0)
+
+    monkeypatch.setattr(gee, "_open", lambda image, sub: {"v": field(sub)})
+    whole = field(GRID)
+    for budget in (10_000_000, 400_000, 1):                 # one tile, several tiles, single cells
+        got = gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "test", verbose=False, max_input_pixels=budget)["v"]
+        assert got.shape == GRID.shape
+        assert np.allclose(got, whole)

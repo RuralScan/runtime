@@ -15,7 +15,7 @@ bbox = [-74.5, 18.0, -71.6, 20.1]        # minx, miny, maxx, maxy, EPSG:4326; pl
 source = ""                              # official boundary and where it comes from (for example GADM 4.1)
 
 [grid]
-resolution_m = 5000                      # coarse first pass; tighten once real data is wired in
+resolution_m = 250                       # SoilGrids is native 250 m, so this is the grid the index can support
 scenario = "baseline"
 
 [target]

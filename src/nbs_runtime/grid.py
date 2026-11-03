@@ -43,6 +43,18 @@ class Grid:
             raise ValueError("the AOI has no bounding box to build a grid from")
         return cls.from_bbox(bbox, resolution_m)
 
+    def window(self, row0: int, row1: int, col0: int, col1: int) -> Grid:
+        """A sub-grid of whole cells, aligned to this grid: rows row0..row1, columns col0..col1."""
+        minx, _, _, maxy = self.bbox
+        r = self.resolution_deg
+        return Grid(
+            bbox=(minx + col0 * r, maxy - row1 * r, minx + col1 * r, maxy - row0 * r),
+            resolution_m=self.resolution_m,
+            resolution_deg=r,
+            width=col1 - col0,
+            height=row1 - row0,
+        )
+
     @property
     def shape(self) -> tuple[int, int]:
         return (self.height, self.width)

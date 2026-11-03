@@ -76,14 +76,35 @@ median and a 5 to 95% range next to CIAT's own index. It does not replace CIAT's
 - Known limits: the draws use an uninformative prior (so the median sits below CIAT's convention); it
   quantifies the effect of the scale and weights only, not the origin of the curves or any validation.
 
-## Layers, the first pass and the maps
+## Layers, resolution and the cache
 
-`data/gee.py` follows CIAT's `DATASET_INPUTS.md`: slope in degrees is derived from SRTM at its native scale and
-only then averaged to the grid (in stages, because Earth Engine limits one aggregation to 32 x 32 input pixels);
-soil is SoilGrids at 0-5, 5-15 and 15-30 cm, converted once (dg/kg x 0.1; pH x 0.1) and weighted by layer thickness;
-the host gate uses WorldCover class shares per cell. Missing values stay unknown: nothing is filled with a mean.
-That module needs an authenticated Earth Engine session and is not tested offline: the notebook's quick check
-(section 3a) pulls a small box and maps every layer first, so each variable is read by eye before the full run.
+The first pass runs on a **250 m grid**. SoilGrids is native 250 m and soil is half of the index weight (carbon 25%,
+pH 25%), so nothing finer is supported by the soil: a 30 m grid would repeat each soil value in blocks of about
+8 x 8 cells and add no information (CIAT: resampling cannot add information). The finer layers are aggregated,
+not resampled. Haiti's box is 936 x 1,292 cells at 250 m (1.2 million), against 84 million at 30 m.
+
+`data/gee.py` follows CIAT's `DATASET_INPUTS.md`:
+
+- slope in degrees is derived from SRTM at its native ~30 m scale and only then averaged to the grid;
+- soil is SoilGrids at 0-5, 5-15 and 15-30 cm, kept as stored and converted once (dg/kg x 0.1; pH x 0.1), then
+  weighted by layer thickness;
+- land cover is stored as the **share of each WorldCover class** in every cell. Which classes count as host is decided
+  afterwards from CIAT's gate, so a change in the gate does not need a new extraction.
+
+Missing values stay unknown: nothing is filled with a mean.
+
+Earth Engine's cost is set by the fine pixels it must read (about 712 million for WorldCover over Haiti's box), not by the
+output resolution, so a coarse grid does not make the extraction faster. Requests are split into tiles to stay within
+Earth Engine's per-user memory. Each extracted layer is saved at once in a `LayerCache` (`cache/layers/<key>/`, ignored
+by git), keyed by the grid and the assets used. An interrupted run resumes, and later runs, or a new CIAT package
+version, read the cache and never call Earth Engine again. The module needs an authenticated session and is not
+tested offline; the notebook's quick check (section 3a) pulls a small box and maps every layer first.
+
+To make the extraction cheaper later: use the official polygon instead of the bounding box (Haiti's land is about
+28,000 km2 against 71,000 km2 for the box), and run large areas as batch exports.
+
+Open question for CIAT: a cell's mean slope hides variation inside the cell (half flat, half steep gives a moderate
+mean). Scoring each fine cell and averaging the scores would be more faithful; the aggregation method is to confirm.
 
 `firstpass.py` computes CIAT's partial terrain-and-soil index over the rasters, and `compare.py` / `viz.py` put the
 ordinal simulation next to it. Two modes: `policy` (every decision recorded; today every cell would be unknown

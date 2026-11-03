@@ -31,8 +31,9 @@ settings, data source). It builds the run configuration, prints what is on hold,
 synthetic data to test the pipeline), computes CIAT's partial terrain-and-soil index, runs the ordinal simulation,
 compares both on maps and saves everything with a manifest to `runs/<fingerprint>/`.
 
-Earth Engine: `pip install -e ".[gee,viz]"` and authenticate once. The notebook has an optional quick check
-(section 3a) that pulls a small box and maps each layer before the full run.
+Earth Engine: `pip install -e ".[gee,viz]"` and authenticate once. The notebook works on a 250 m grid, has an
+optional quick check (section 3a) that pulls a small box and maps each layer, and saves every extracted layer in
+`cache/layers/` so Earth Engine is called once. See `docs/DESIGN.md` for why 250 m.
 
 ## How it connects to CIAT
 

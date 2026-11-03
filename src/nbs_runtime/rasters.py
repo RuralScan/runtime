@@ -13,6 +13,7 @@ import numpy as np
 # ---- SoilGrids conversions: "convert each native value once" (DATASET_INPUTS.md) ----
 SOC_DG_PER_KG_TO_G_PER_KG = 0.1      # soc_mean is stored in dg/kg
 PH_X10_TO_PH = 0.1                   # phh2o_mean is stored as pH x 10
+WORLDCOVER_CODES = (10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100)     # ESA WorldCover v200 classes
 TOPSOIL_LAYERS = ("0-5", "5-15", "15-30")
 TOPSOIL_THICKNESS_CM = (5.0, 10.0, 15.0)
 
@@ -125,3 +126,28 @@ def host_fractions_from_classes(
     known = np.isin(c, list(groups["eligible"]) + list(groups["ineligible"]))
     unknown = (~known).astype(float)
     return block_mean(eligible, factor), block_mean(unknown, factor)
+
+
+def host_fractions_from_shares(
+    groups: Mapping[str, Sequence[int]], shares: Mapping[int, np.ndarray]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Eligible and unknown host fractions from the share of each land-cover class in each cell.
+
+    Storing the share of every class (instead of a ready-made eligible/unknown pair) means a change
+    in CIAT's gate never needs a new Earth Engine extraction. A cell with no valid fine pixel is NaN.
+    """
+    any_share = next(iter(shares.values()))
+    zero = np.zeros_like(any_share, dtype=float)
+    eligible = sum((shares[c] for c in groups["eligible"] if c in shares), zero)
+    ineligible = sum((shares[c] for c in groups["ineligible"] if c in shares), zero)
+    unknown = 1.0 - (eligible + ineligible)
+    return eligible, unknown
+
+
+def share_sum_warnings(shares: Mapping[int, np.ndarray]) -> list[str]:
+    """The class shares of a cell should add up to 1 wherever the cell has data."""
+    total = sum(shares.values())
+    ok = total[~np.isnan(total)]
+    if ok.size and not (0.99 <= float(np.median(ok)) <= 1.01):
+        return [f"land-cover shares add up to {float(np.median(ok)):.3f} (median), not 1: check the class list"]
+    return []

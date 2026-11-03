@@ -29,7 +29,7 @@ class RunSpec:
 
 @dataclass(frozen=True)
 class GridSpec:
-    resolution_m: int = 5000
+    resolution_m: int = 250
     scenario: str = "baseline"
 
 
