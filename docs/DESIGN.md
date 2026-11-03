@@ -103,6 +103,34 @@ tested offline; the notebook's quick check (section 3a) pulls a small box and ma
 To make the extraction cheaper later: use the official polygon instead of the bounding box (Haiti's land is about
 28,000 km2 against 71,000 km2 for the box), and run large areas as batch exports.
 
+## Two ways to run
+
+| | Quick overview | Detailed |
+|---|---|---|
+| `RESOLUTION_M` | 5000 (47 x 65 cells for Haiti) | 250 |
+| `HOST_GATE` | `"skip"` | `"apply"` |
+| Earth Engine requests | about 54 | about 400 to 500 |
+
+A 5 km grid is not faster by itself, because Earth Engine still reads every fine pixel under each cell; what makes the
+quick overview quick is skipping WorldCover (the slowest layer) and running requests in parallel (`GEE_WORKERS`). Before
+extracting, the notebook prints how many requests the run can make, and while it runs it shows the tiles done, the time spent
+and a rough time left. Each grid has its own cache folder, so changing the resolution never reuses another grid's layers.
+
+At 5 km the inputs are averaged over each cell before the functions are applied (a cell's mean slope, not the slope of each
+30 m cell), so the result is an overview and not a substitute for the 250 m calculation.
+
+## Overview and sensitivity
+
+The calculation stays at the fine grid and only the **result** is summarised in coarse blocks (`overview.py`, for example 5 km):
+each block's value is the mean over its scored cells, and a block with too few scored cells (`MIN_SCORED_SHARE`) stays
+unknown. A block is never scored from an averaged input, because averaging a step function's input hides what is inside the
+block (half 2 degrees, half 45 degrees averages to a slope the function leaves unknown). The notebook also draws a *ladder*:
+for every class combination present in the data, CIAT's index and the simulated 5-95% range. Where two bars overlap, the order
+of those classes is not settled by the data.
+
+For a fast, exploratory view, `HOST_GATE = "skip"` never reads WorldCover (the slowest layer) and treats every cell as host;
+`ONLY_FROM_CACHE = True` never calls Earth Engine. Both are labelled on every map and in the manifest.
+
 Open question for CIAT: a cell's mean slope hides variation inside the cell (half flat, half steep gives a moderate
 mean). Scoring each fine cell and averaging the scores would be more faithful; the aggregation method is to confirm.
 

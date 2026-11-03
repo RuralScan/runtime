@@ -145,3 +145,46 @@ def test_stitching_tiles_gives_the_same_array_as_one_request(monkeypatch):
         got = gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "test", verbose=False, max_input_pixels=budget)["v"]
         assert got.shape == GRID.shape
         assert np.allclose(got, whole)
+
+
+# ---- parallel requests, progress and the request plan ----
+
+def test_request_plan_for_haiti_at_5_km():
+    plan = gee.request_plan(GRID, host="apply")
+    assert plan["slope"] == 48 and plan["soil (6 bands)"] == 6 and plan["land cover (11 classes)"] == 352
+    assert plan["total"] == 48 + 6 + 352
+    skip = gee.request_plan(GRID, host="skip")
+    assert "land cover (11 classes)" not in skip and skip["total"] == 54
+
+
+def _field(grid):
+    lon, lat = grid.cell_centres()
+    return np.add.outer(lat * 3.0, lon * 7.0)
+
+
+def test_parallel_fetch_gives_the_same_array_as_sequential(monkeypatch):
+    monkeypatch.setattr(gee, "_open", lambda image, sub: {"v": _field(sub)})
+    seq = gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "t", verbose=False, workers=1)["v"]
+    par = gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "t", verbose=False, workers=4)["v"]
+    assert np.array_equal(seq, par) and np.allclose(par, _field(GRID))
+
+
+def test_a_failing_tile_is_raised_in_parallel_mode_too(monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(image, sub):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise RuntimeError("User memory limit exceeded")
+        return {"v": _field(sub)}
+
+    monkeypatch.setattr(gee, "_open", flaky)
+    with pytest.raises(RuntimeError, match="memory"):
+        gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "t", verbose=False, workers=4)
+
+
+def test_progress_reports_time_left(monkeypatch, capsys):
+    monkeypatch.setattr(gee, "_open", lambda image, sub: {"v": _field(sub)})
+    gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "slope", verbose=True, workers=2)
+    out = capsys.readouterr().out
+    assert "tiles" in out and "left" in out and "done in" in out

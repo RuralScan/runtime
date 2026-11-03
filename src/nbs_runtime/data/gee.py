@@ -26,7 +26,9 @@ quick check (section 3a) pulls a small box and maps every layer, so read it befo
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 
@@ -135,31 +137,64 @@ def _open(image, grid: Grid) -> dict[str, np.ndarray]:
 
 
 def _fetch(image, grid: Grid, native_deg: float, label: str, verbose: bool = True,
-           max_input_pixels: int = MAX_TILE_INPUT_PIXELS) -> dict[str, np.ndarray]:
-    """Fetch an image on the whole grid, one small tile at a time, and stitch the tiles together."""
+           max_input_pixels: int = MAX_TILE_INPUT_PIXELS, workers: int = 1) -> dict[str, np.ndarray]:
+    """Fetch an image on the whole grid, one small tile at a time (several at once), and stitch the tiles.
+
+    Progress shows the tiles done, the time spent and a rough time left. Earth Engine limits how many
+    requests one user can have open at once, so keep `workers` modest (4 is a reasonable start).
+    """
     tiles = tile_plan(grid, native_deg, max_input_pixels)
     out: dict[str, np.ndarray] = {}
-    for k, (r0, r1, c0, c1) in enumerate(tiles, 1):
-        if verbose:
-            print(f"  {label}: tile {k}/{len(tiles)}", end="\r")
-        for name, arr in _open(image, grid.window(r0, r1, c0, c1)).items():
+    start = time.time()
+
+    def stitch(tile, arrays):
+        r0, r1, c0, c1 = tile
+        for name, arr in arrays.items():
             out.setdefault(name, np.full(grid.shape, np.nan))[r0:r1, c0:c1] = arr
+
+    def report(done):
+        if verbose:
+            spent = time.time() - start
+            left = spent / done * (len(tiles) - done)
+            print(f"  {label}: {done}/{len(tiles)} tiles | {spent:,.0f} s spent, about {left:,.0f} s left   ", end="\r")
+
+    if workers <= 1 or len(tiles) == 1:
+        for k, tile in enumerate(tiles, 1):
+            stitch(tile, _open(image, grid.window(*tile)))
+            report(k)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_open, image, grid.window(*t)): t for t in tiles}
+            for k, fut in enumerate(as_completed(futures), 1):
+                stitch(futures[fut], fut.result())          # the first failure is raised here
+                report(k)
     if verbose:
-        print(f"  {label}: {len(tiles)} tile(s) done      ")
+        print(f"  {label}: {len(tiles)} tile(s) done in {time.time() - start:,.0f} s" + " " * 30)
     return out
 
 
-def load_slope(grid: Grid, verbose: bool = True, max_input_pixels: int = MAX_TILE_INPUT_PIXELS) -> np.ndarray:
+def request_plan(grid: Grid, host: str = "apply", max_input_pixels: int = MAX_TILE_INPUT_PIXELS) -> dict[str, int]:
+    """How many Earth Engine requests an extraction will make, per layer, before it starts."""
+    n = lambda native: len(tile_plan(grid, native, max_input_pixels))
+    plan = {"slope": n(SRTM_NATIVE_DEG), "soil (6 bands)": 6 * n(SOILGRIDS_NATIVE_DEG)}
+    if host == "apply":
+        plan["land cover (11 classes)"] = n(WORLDCOVER_NATIVE_DEG)
+    plan["total"] = sum(plan.values())
+    return plan
+
+
+def load_slope(grid: Grid, verbose: bool = True, max_input_pixels: int = MAX_TILE_INPUT_PIXELS,
+               workers: int = 1) -> np.ndarray:
     import ee
 
     elevation = ee.Image(SRTM).select("elevation")
     slope = ee.Terrain.slope(elevation).rename("slope")                 # degrees, native scale
     img = _aggregate(slope, grid, SRTM_NATIVE_DEG)
-    return _fetch(img, grid, SRTM_NATIVE_DEG, "slope", verbose, max_input_pixels)["slope"]
+    return _fetch(img, grid, SRTM_NATIVE_DEG, "slope", verbose, max_input_pixels, workers)["slope"]
 
 
 def load_soilgrids_band(grid: Grid, variable: str, depth: str, verbose: bool = True,
-                        max_input_pixels: int = MAX_TILE_INPUT_PIXELS) -> np.ndarray:
+                        max_input_pixels: int = MAX_TILE_INPUT_PIXELS, workers: int = 1) -> np.ndarray:
     """One SoilGrids mean prediction at one depth, in the stored units (not yet converted)."""
     import ee
 
@@ -169,24 +204,36 @@ def load_soilgrids_band(grid: Grid, variable: str, depth: str, verbose: bool = T
     if band not in available:
         raise ValueError(f"band {band!r} not in {SOILGRIDS_PREFIX}/{variable}_mean; bands: {available}")
     img = _aggregate(image.select(band), grid, SOILGRIDS_NATIVE_DEG)
-    return next(iter(_fetch(img, grid, SOILGRIDS_NATIVE_DEG, band, verbose, max_input_pixels).values()))
+    return next(iter(_fetch(img, grid, SOILGRIDS_NATIVE_DEG, band, verbose, max_input_pixels, workers).values()))
 
 
-def load_worldcover_shares(grid: Grid, verbose: bool = True,
-                           max_input_pixels: int = MAX_TILE_INPUT_PIXELS) -> dict[int, np.ndarray]:
+def load_worldcover_shares(grid: Grid, verbose: bool = True, max_input_pixels: int = MAX_TILE_INPUT_PIXELS,
+                           workers: int = 1) -> dict[int, np.ndarray]:
     """Share of fine cells in each WorldCover class, per output cell (one request per tile)."""
     import ee
 
     wc = ee.ImageCollection(WORLDCOVER).first().select("Map")
     bands = [wc.eq(code).rename(f"c{code}") for code in WORLDCOVER_CODES]     # masked pixels stay masked
     img = _aggregate(ee.Image.cat(bands), grid, WORLDCOVER_NATIVE_DEG)
-    out = _fetch(img, grid, WORLDCOVER_NATIVE_DEG, "WorldCover classes", verbose, max_input_pixels)
+    out = _fetch(img, grid, WORLDCOVER_NATIVE_DEG, "WorldCover classes", verbose, max_input_pixels, workers)
     return {code: out[f"c{code}"] for code in WORLDCOVER_CODES}
 
 
+class MissingLayersError(RuntimeError):
+    """cache_only was asked for, but some layers are not in the cache yet."""
+
+
 def load_layers(grid: Grid, groups: Mapping[str, Sequence[int]], cache: LayerCache | None = None,
-                verbose: bool = True, max_input_pixels: int = MAX_TILE_INPUT_PIXELS) -> Layers:
-    """All first-pass layers on the grid. With a cache, each layer is read from it or fetched and saved."""
+                verbose: bool = True, max_input_pixels: int = MAX_TILE_INPUT_PIXELS,
+                host: str = "apply", cache_only: bool = False, workers: int = 1) -> Layers:
+    """All first-pass layers on the grid. With a cache, each layer is read from it or fetched and saved.
+
+    host="apply"  extract the WorldCover class shares (the slowest layer) and apply CIAT's host gate;
+    host="skip"   never touch WorldCover: every cell counts as host (exploratory overview, labelled);
+    cache_only    never call Earth Engine: use what is cached and say what is missing.
+    """
+    if host not in ("apply", "skip"):
+        raise ValueError("host must be 'apply' or 'skip'")
 
     def cached(name: str, fetch):
         if cache is not None:
@@ -195,25 +242,37 @@ def load_layers(grid: Grid, groups: Mapping[str, Sequence[int]], cache: LayerCac
                 if verbose:
                     print(f"  {name}: from cache")
                 return got
+        if cache_only:
+            raise MissingLayersError(name)
         arrays = fetch()
         if cache is not None:
             cache.put(name, arrays)
         return arrays
 
-    kw = {"verbose": verbose, "max_input_pixels": max_input_pixels}
+    kw = {"verbose": verbose, "max_input_pixels": max_input_pixels, "workers": workers}
+    needed = ["slope", *[f"soc_{d}" for d in TOPSOIL_LAYERS], *[f"phh2o_{d}" for d in TOPSOIL_LAYERS]]
+    if host == "apply":
+        needed.append("worldcover_shares")
+    if cache_only:
+        missing = [n for n in needed if cache is None or not cache.has(n)]
+        if missing:
+            raise MissingLayersError(f"not in the cache yet: {', '.join(missing)}")
     slope = cached("slope", lambda: {"slope": load_slope(grid, **kw)})["slope"]
     soc_raw = {d: cached(f"soc_{d}", lambda d=d: {"v": load_soilgrids_band(grid, "soc", d, **kw)})["v"]
                for d in TOPSOIL_LAYERS}
     ph_raw = {d: cached(f"phh2o_{d}", lambda d=d: {"v": load_soilgrids_band(grid, "phh2o", d, **kw)})["v"]
               for d in TOPSOIL_LAYERS}
-    got = cached("worldcover_shares",
-                 lambda: {str(c): a for c, a in load_worldcover_shares(grid, **kw).items()})
-    shares = {int(k): v for k, v in got.items()}
+    shares = None
+    if host == "apply":
+        got = cached("worldcover_shares",
+                     lambda: {str(c): a for c, a in load_worldcover_shares(grid, **kw).items()})
+        shares = {int(k): v for k, v in got.items()}
     notes = [
         f"slope: {SRTM}, ee.Terrain.slope at native scale, then mean to {grid.resolution_m} m",
         ("soil: SoilGrids mean predictions 0-5, 5-15, 15-30 cm, thickness-weighted "
          "(scoping proposal planted_topsoil_0_30_v1, not yet selected by CIAT)"),
-        f"host: {WORLDCOVER} Map band, share of each class averaged to the grid",
+        (f"host: {WORLDCOVER} Map band, share of each class averaged to the grid" if host == "apply"
+         else "host: gate skipped (WorldCover not read)"),
     ]
     if cache is not None:
         notes.append(f"layer cache: {cache.dir}")
