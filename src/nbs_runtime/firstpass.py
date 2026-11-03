@@ -39,6 +39,7 @@ class Layers:
     soc_by_depth: dict[str, np.ndarray] | None = None
     ph_by_depth: dict[str, np.ndarray] | None = None
     synthetic: bool = False
+    host_gate_applied: bool = True          # False: every cell is treated as host (exploratory overview)
     notes: list[str] = field(default_factory=list)
 
     def check_shapes(self) -> None:

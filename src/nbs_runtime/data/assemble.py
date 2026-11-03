@@ -27,18 +27,26 @@ def assemble_layers(
     slope_deg: np.ndarray,
     soc_raw: Mapping[str, np.ndarray],
     ph_raw: Mapping[str, np.ndarray],
-    shares: Mapping[int, np.ndarray],
+    shares: Mapping[int, np.ndarray] | None,
     groups: Mapping[str, Sequence[int]],
     notes: Sequence[str] = (),
 ) -> Layers:
+    """With shares=None the host gate is NOT applied: every cell counts as host (an exploratory overview)."""
     soc_by = {d: np.asarray(a, dtype=float) * SOC_DG_PER_KG_TO_G_PER_KG for d, a in soc_raw.items()}
     ph_by = {d: np.asarray(a, dtype=float) * PH_X10_TO_PH for d, a in ph_raw.items()}
     soc = thickness_weighted([soc_by[d] for d in TOPSOIL_LAYERS])
     ph = thickness_weighted([ph_by[d] for d in TOPSOIL_LAYERS])
-    fe, fu = host_fractions_from_shares(groups, shares)
+    slope = np.asarray(slope_deg, dtype=float)
+    if shares is None:
+        fe, fu = np.ones_like(slope), np.zeros_like(slope)
+        extra = ["host gate NOT applied: every cell is treated as host, so this is not the policy's gate"]
+    else:
+        fe, fu = host_fractions_from_shares(groups, shares)
+        extra = share_sum_warnings(shares)
     return Layers(
-        slope_deg=np.asarray(slope_deg, dtype=float), soc_g_kg=soc, ph=ph,
+        slope_deg=slope, soc_g_kg=soc, ph=ph,
         eligible_fraction=fe, unknown_fraction=fu,
         soc_by_depth=soc_by, ph_by_depth=ph_by, synthetic=False,
-        notes=[*notes, *soil_value_warnings(soc, ph), *share_sum_warnings(shares)],
+        host_gate_applied=shares is not None,
+        notes=[*notes, *soil_value_warnings(soc, ph), *extra],
     )
