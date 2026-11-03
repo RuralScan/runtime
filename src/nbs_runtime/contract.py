@@ -73,6 +73,14 @@ class Package:
                 )
         raise KeyError(f"policy {policy_id!r} not in package {self.version}")
 
+    def gate_params(self, policy: Policy, role: str = "eligibility_gate") -> dict[str, Any]:
+        """Declared parameters of the policy's gate with the given role (host or legal mask)."""
+        for rid in policy.gate_rule_ids:
+            row = self.rows[rid]
+            if row["role"] == role:
+                return row["declared_relationship"]["params"]
+        raise KeyError(f"policy {policy.policy_id!r} has no gate with role {role!r}")
+
     def option(self, rule_id: str, function_id: str) -> dict[str, Any]:
         for o in self.rows[rule_id]["function_options"]:
             if o["function_id"] == function_id:

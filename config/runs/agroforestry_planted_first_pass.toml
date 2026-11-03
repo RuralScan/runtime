@@ -1,4 +1,4 @@
-# One file = one run's decisions. The package itself is pinned in upstream/PIN.json.
+# One file = one run's decisions. The CIAT package itself is pinned in upstream/PIN.json.
 # Empty values are open decisions; plan() reports them as holds. Do not fill in a value
 # that has not been decided: leave it empty and keep the unknowns explicit.
 
@@ -6,10 +6,20 @@
 nbs_id = "agroforestry"
 system = "planted_silvoarable"
 policy_id = "planted_terrain_soil_v1"   # approved by Pete 2026-10-27 (CIAT issue #455)
+mode = "exploratory"                    # exploratory: legal mask not applied, holds stay open; policy: all decisions recorded
+
+[aoi]
+kind = "bbox"                            # bbox | geojson | admin
+name = "Haiti (approximate box)"
+bbox = [-74.5, 18.0, -71.6, 20.1]        # minx, miny, maxx, maxy, EPSG:4326; placeholder box
+source = ""                              # official boundary and where it comes from (for example GADM 4.1)
+
+[grid]
+resolution_m = 5000                      # coarse first pass; tighten once real data is wired in
+scenario = "baseline"
 
 [target]
 country = "HTI"                  # Haiti was the proposed AOI; naming it does not approve transfer
-aoi_source = ""                  # exact boundary and where it comes from
 applicability_decision = ""      # decision reference for using the India pools in the target
 
 [soil]
@@ -23,3 +33,14 @@ legal_mask_spec = ""             # assessed rule and coverage; IUCN categories a
 [host_inputs]
 # class 30 (grassland) needs a documented local source; leave empty to keep it unknown
 managed_forage_without_grazing = ""
+
+[simulation]
+n_draws = 5000
+seed = 20261103                  # same seed, same result; record it with every run
+scale_mode = "independent"       # independent | shared (see docs/DESIGN.md)
+prior = "uniform"
+weight_concentration = 0         # 0 keeps CIAT's weights fixed; for example 20 lets them vary
+
+[data]
+order = ["local", "hf", "gee"]   # where to look for a layer, in this order
+hf_repo = "dagudelo30/nbs-ruralscan-data"

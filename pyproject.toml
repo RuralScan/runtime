@@ -12,9 +12,10 @@ dependencies = []                      # core logic is pure Python on purpose
 
 [project.optional-dependencies]
 geo = ["numpy", "rasterio", "xarray", "rioxarray"]
-gee = ["earthengine-api"]
+gee = ["earthengine-api", "xee", "xarray"]
 hf  = ["huggingface_hub"]
-dev = ["pytest", "ruff"]
+viz = ["matplotlib"]
+dev = ["pytest", "ruff", "numpy"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

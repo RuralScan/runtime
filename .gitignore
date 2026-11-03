@@ -8,3 +8,6 @@ __pycache__/
 *.tif
 *.zip
 .ipynb_checkpoints/
+*.egg-info/
+build/
+dist/

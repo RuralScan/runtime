@@ -14,7 +14,7 @@ partial terrain-and-soil index, not complete agroforestry suitability.
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 python scripts/sync_upstream.py --check     # pinned CIAT files are intact
-pytest                                      # 40 response cases + 6 policy cases + checks
+pytest                                      # CIAT's 40 + 6 cases, plus our own checks
 ```
 
 ```python
@@ -25,6 +25,14 @@ p = plan(Path("config/runs/agroforestry_planted_first_pass.toml"))
 print(p.package_version, p.package_ref[:8])
 print(*p.holds, sep="\n")      # open decisions that block a run
 ```
+
+The notebook `notebooks/01_agroforestry.ipynb` has one parameters cell (AOI, grid, decisions, simulation
+settings, data source). It builds the run configuration, prints what is on hold, loads the layers (Earth Engine, or
+synthetic data to test the pipeline), computes CIAT's partial terrain-and-soil index, runs the ordinal simulation,
+compares both on maps and saves everything with a manifest to `runs/<fingerprint>/`.
+
+Earth Engine: `pip install -e ".[gee,viz]"`, authenticate once, then check the adapter on a tiny area with
+`python scripts/check_gee.py --project <your-project>` before a full run.
 
 ## How it connects to CIAT
 
