@@ -38,9 +38,9 @@ def plot_comparison(fp: FirstPass, comp: Comparison, grid: Grid, title: str,
     draw(axes[1, 1], comp.p_top, "Chance of being in the top third", "viridis", 0, 1, "probability")
 
     ax = axes[1, 2]
-    colors = ["#2e7d32", "#9e9e9e", "#fb8c00", "#ef5350", "#8e24aa"]
+    colors = ["#2e7d32", "#9e9e9e", "#fb8c00", "#ef5350", "#8e24aa", "#bdbdbd"]
     cmap_s = mcolors.ListedColormap(colors)
-    ax.imshow(fp.status, cmap=cmap_s, vmin=-0.5, vmax=4.5, extent=extent, origin="upper",
+    ax.imshow(fp.status, cmap=cmap_s, vmin=-0.5, vmax=5.5, extent=extent, origin="upper",
               interpolation="nearest")
     ax.set_title("Pixel state", fontsize=11)
     ax.set_xlabel("longitude")
@@ -69,8 +69,8 @@ def plot_layers(layers, grid: Grid, title: str, out_path: Path | None = None):
         (layers.slope_deg, "Slope (degrees)", "terrain", None, None),
         (layers.soc_g_kg, "Soil organic carbon, 0-30 cm (g/kg)", "copper", None, None),
         (layers.ph, "Soil pH, 0-30 cm", "RdYlGn", 4.0, 9.0),
-        (layers.eligible_fraction, "Host-eligible share of each cell", "Greens", 0.0, 1.0),
-        (layers.unknown_fraction, "Unknown-host share of each cell", "Greys", 0.0, 1.0),
+        (layers.eligible_fraction, "Host-eligible share of each cell" + ("" if layers.host_gate_applied else "\n(gate NOT applied: all 1)"), "Greens", 0.0, 1.0),
+        (layers.unknown_fraction, "Unknown-host share of each cell" + ("" if layers.host_gate_applied else "\n(gate NOT applied: all 0)"), "Greys", 0.0, 1.0),
         (unknown_any.astype(float), "Cells with an unknown slope, SOC or pH", "Reds", 0.0, 1.0),
     ]
     for ax, (data, name, cmap, vmin, vmax) in zip(axes.ravel(), panels, strict=True):
@@ -152,6 +152,34 @@ def plot_combo_ladder(res, counts: dict[int, int], title: str, footnote: str = "
         plt.Line2D([], [], color="#4C3FA8", lw=4, alpha=0.45, label="simulation 5-95% range"),
     ], loc="lower right", fontsize=9, frameon=False)
     ax.set_title(title, fontsize=13, fontweight="bold")
+    if footnote:
+        fig.text(0.5, 0.005, footnote, ha="center", fontsize=9, color="#444444")
+    fig.tight_layout(rect=(0, 0.02, 1, 1))
+    if out_path is not None:
+        fig.savefig(out_path, dpi=150)
+    return fig
+
+
+def plot_reasons(layers, space, grid: Grid, title: str, footnote: str = "", out_path: Path | None = None):
+    """A map of why each cell is or is not scored, with the share of cells for each reason."""
+    import matplotlib.colors as mcolors
+    import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
+
+    from .firstpass import REASONS, reason_map
+
+    codes = reason_map(space, layers)
+    if layers.synthetic:
+        title = "SYNTHETIC TEST: " + title
+    colors = ["#2e7d32", "#bdbdbd", "#fb8c00", "#8e24aa", "#6d4c41", "#c62828"]
+    fig, ax = plt.subplots(figsize=(11, 7))
+    ax.imshow(codes, cmap=mcolors.ListedColormap(colors), vmin=-0.5, vmax=5.5, extent=grid.extent,
+              origin="upper", interpolation="nearest")
+    ax.set_xlabel("longitude")
+    ax.set_title(title, fontsize=13, fontweight="bold")
+    handles = [mpatches.Patch(color=colors[k], label=f"{REASONS[k]}  ({100 * (codes == k).mean():.1f}%)")
+               for k in REASONS]
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.12), fontsize=9, frameon=False)
     if footnote:
         fig.text(0.5, 0.005, footnote, ha="center", fontsize=9, color="#444444")
     fig.tight_layout(rect=(0, 0.02, 1, 1))

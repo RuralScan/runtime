@@ -116,7 +116,7 @@ def test_first_pass_agrees_with_the_pixel_rule_in_aggregate_combine(pkg, space, 
         host = True if fe > 0 else (False if fu == 0 else None)
         excluded = None if mode == "policy" else False
         want = combine(policy, scores, host, excluded, fe)
-        got = {0: "scored", 1: "excluded", 2: "unknown", 3: "unknown", 4: "unknown"}[int(fp.status[0, 0])]
+        got = {0: "scored", 1: "excluded", 2: "unknown", 3: "unknown", 4: "unknown", 5: "unknown"}[int(fp.status[0, 0])]
         assert got == want["status"]
         if want["status"] == "scored":
             assert fp.pete[0, 0] == pytest.approx(want["score"])
@@ -158,3 +158,46 @@ def test_synthetic_layers_are_deterministic_and_plausible():
     assert np.array_equal(a.slope_deg, b.slope_deg) and a.synthetic
     assert 0 <= np.nanmin(a.slope_deg) and np.nanmax(a.slope_deg) <= 40
     assert 4 < np.nanmedian(a.soc_g_kg) < 40 and 4 < np.nanmedian(a.ph) < 9
+
+
+# ---- why a cell is not scored ----
+
+def test_reason_map_separates_no_data_from_gaps_in_the_functions(space):
+    from nbs_runtime.firstpass import REASONS, explain_unscored, reason_map
+
+    def pixel(slope, soc, ph):
+        return Layers(*(np.array([[v]], dtype=float) for v in (slope, soc, ph, 1.0, 0.0)))
+
+    cases = {
+        (8.0, 25.0, 6.8): 0,            # all known, inside the functions
+        (np.nan, 25.0, 6.8): 1,         # no data
+        (25.0, 25.0, 6.8): 2,           # slope 20-44 deg: gap
+        (8.0, 25.0, 6.0): 3,            # pH 5.55-6.45: gap (two sources disagree)
+        (25.0, 25.0, 6.0): 5,           # two gaps
+    }
+    for (slope, soc, ph), want in cases.items():
+        assert int(reason_map(space, pixel(slope, soc, ph))[0, 0]) == want, (slope, soc, ph)
+    lay = synthetic_layers(Grid.from_bbox((-74.5, 18.0, -71.6, 20.1), 5000), seed=3)
+    out = explain_unscored(space, lay)
+    assert set(out) == set(REASONS.values())
+    assert sum(n for n, _ in out.values()) == lay.slope_deg.size
+    assert sum(share for _, share in out.values()) == pytest.approx(1.0)
+
+
+def test_a_cell_is_scored_exactly_when_the_reason_map_says_so(space):
+    from nbs_runtime.firstpass import reason_map
+
+    lay = synthetic_layers(Grid.from_bbox((-74.5, 18.0, -71.6, 20.1), 5000), seed=3)
+    lay.eligible_fraction = np.ones_like(lay.slope_deg)
+    lay.unknown_fraction = np.zeros_like(lay.slope_deg)
+    fp = run_first_pass(space, lay, "exploratory")
+    assert np.array_equal(reason_map(space, lay) == 0, fp.scored)
+
+
+def test_no_data_is_kept_apart_from_a_value_in_a_function_gap(space):
+    def pixel(slope, soc, ph):
+        return Layers(*(np.array([[v]], dtype=float) for v in (slope, soc, ph, 1.0, 0.0)))
+
+    assert int(run_first_pass(space, pixel(np.nan, 25.0, 6.8), "exploratory").status[0, 0]) == 5   # no data
+    assert int(run_first_pass(space, pixel(8.0, 25.0, 6.0), "exploratory").status[0, 0]) == 3      # pH gap
+    assert int(run_first_pass(space, pixel(8.0, 25.0, 6.8), "exploratory").status[0, 0]) == 0      # scored

@@ -26,9 +26,11 @@ quick check (section 3a) pulls a small box and maps every layer, so read it befo
 from __future__ import annotations
 
 import math
+import os
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import numpy as np
 
@@ -91,10 +93,55 @@ def tile_plan(grid: Grid, native_deg: float, max_input_pixels: int = MAX_TILE_IN
     ]
 
 
-def init_ee(project: str | None = None) -> None:
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def read_env_file(path: Path | str) -> dict[str, str]:
+    """Read KEY=VALUE lines from a .env file (comments and blank lines ignored, quotes stripped)."""
+    p = Path(path)
+    if not p.exists():
+        return {}
+    out = {}
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        out[key.strip()] = value.strip().strip("\"'")
+    return out
+
+
+def resolve_project(project: str | None = None, environ: Mapping[str, str] | None = None,
+                    env_file: Path | str | None = None) -> str | None:
+    """The Earth Engine project: the argument, else the EE_PROJECT environment variable, else .env."""
+    environ = os.environ if environ is None else environ
+    file_values = read_env_file(REPO_ROOT / ".env" if env_file is None else env_file)
+    for candidate in (project, environ.get("EE_PROJECT"), file_values.get("EE_PROJECT")):
+        if candidate and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def init_ee(project: str | None = None, authenticate_if_needed: bool = True) -> str:
+    """Start Earth Engine; authenticate once if this machine is not signed in. Returns the project used.
+
+    The project id is never written in the code or in the notebook: pass it, set EE_PROJECT, or put
+    EE_PROJECT=... in a .env file at the repository root (git ignores it).
+    """
+    proj = resolve_project(project)
+    if proj is None:
+        raise RuntimeError("No Earth Engine project. Put EE_PROJECT=your-project-id in a .env file at the "
+                           "repository root (or set the EE_PROJECT environment variable).")
     import ee
 
-    ee.Initialize(project=project or None)
+    try:
+        ee.Initialize(project=proj)
+    except ee.EEException:
+        if not authenticate_if_needed:
+            raise
+        ee.Authenticate()
+        ee.Initialize(project=proj)
+    return proj
 
 
 def _aggregate(image, grid: Grid, native_deg: float):

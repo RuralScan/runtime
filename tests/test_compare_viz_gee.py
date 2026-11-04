@@ -188,3 +188,55 @@ def test_progress_reports_time_left(monkeypatch, capsys):
     gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "slope", verbose=True, workers=2)
     out = capsys.readouterr().out
     assert "tiles" in out and "left" in out and "done in" in out
+
+
+# ---- Earth Engine start-up: project id from .env, authenticate once ----
+
+def test_env_file_is_read_without_extra_dependencies(tmp_path):
+    f = tmp_path / ".env"
+    f.write_text('# comment\n\nEE_PROJECT = "my-project"\nHF_TOKEN=abc\nnot a pair\n', encoding="utf-8")
+    assert gee.read_env_file(f) == {"EE_PROJECT": "my-project", "HF_TOKEN": "abc"}
+    assert gee.read_env_file(tmp_path / "missing.env") == {}
+
+
+def test_project_comes_from_the_argument_then_the_environment_then_the_file(tmp_path):
+    f = tmp_path / ".env"
+    f.write_text("EE_PROJECT=from-file\n", encoding="utf-8")
+    assert gee.resolve_project("from-arg", {"EE_PROJECT": "from-env"}, f) == "from-arg"
+    assert gee.resolve_project(None, {"EE_PROJECT": "from-env"}, f) == "from-env"
+    assert gee.resolve_project(None, {}, f) == "from-file"
+    assert gee.resolve_project("  ", {}, tmp_path / "none.env") is None
+
+
+def test_init_ee_authenticates_once_when_the_machine_is_not_signed_in(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    class EEException(Exception):
+        pass
+
+    calls = []
+    fake = types.ModuleType("ee")
+    fake.EEException = EEException
+
+    def initialize(project=None):
+        calls.append(("init", project))
+        if calls.count(("init", project)) == 1:
+            raise EEException("Please authorize access to your Earth Engine account")
+
+    fake.Initialize = initialize
+    fake.Authenticate = lambda: calls.append(("auth", None))
+    monkeypatch.setitem(sys.modules, "ee", fake)
+    monkeypatch.setenv("EE_PROJECT", "p1")
+    assert gee.init_ee() == "p1"
+    assert calls == [("init", "p1"), ("auth", None), ("init", "p1")]
+    with pytest.raises(EEException):
+        calls.clear()
+        gee.init_ee("p2", authenticate_if_needed=False)
+
+
+def test_init_ee_explains_a_missing_project(monkeypatch):
+    monkeypatch.delenv("EE_PROJECT", raising=False)
+    monkeypatch.setattr(gee, "REPO_ROOT", __import__("pathlib").Path("/nonexistent"))
+    with pytest.raises(RuntimeError, match="EE_PROJECT"):
+        gee.init_ee()

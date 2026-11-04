@@ -7,9 +7,36 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+from pathlib import Path
+
+STALE_MESSAGE = (
+    "This Python session loaded an older version of the package before the files were updated. "
+    "The files on disk are newer than what is running."
+)
+
+
+def session_is_stale(init_path: Path | None = None, tolerance_s: float = 5.0) -> bool:
+    """True when the files on disk are newer than the code this Python session imported.
+
+    Python does not reload a module it already imported, so copying new files over an open notebook has no
+    effect until the kernel restarts. If the __init__.py on disk is itself old (it has no import stamp), the
+    problem is the files, not the session.
+    """
+    import nbs_runtime
+
+    init = Path(init_path) if init_path else Path(nbs_runtime.__file__)
+    if "_IMPORTED_AT" not in init.read_text(encoding="utf-8"):
+        return False
+    imported = getattr(nbs_runtime, "_IMPORTED_AT", None)
+    if imported is None:
+        return True                                   # disk is new, memory is old
+    newest = max(p.stat().st_mtime for p in init.parent.rglob("*.py"))
+    return newest > imported + tolerance_s
 
 
 def check() -> list[str]:
+    if session_is_stale():
+        return [STALE_MESSAGE]
     problems: list[str] = []
 
     def need(ok: bool, message: str) -> None:
@@ -20,6 +47,12 @@ def check() -> list[str]:
         from .firstpass import Layers
         need("host_gate_applied" in {f.name for f in dataclasses.fields(Layers)},
              "firstpass.py is out of date (Layers has no host_gate_applied)")
+    except ImportError as exc:
+        problems.append(f"firstpass.py: {exc}")
+
+    try:
+        from .firstpass import STATUS
+        need(5 in STATUS, "firstpass.py is out of date (no 'no data' state)")
     except ImportError as exc:
         problems.append(f"firstpass.py: {exc}")
 
@@ -39,11 +72,12 @@ def check() -> list[str]:
         from .data import gee
         params = inspect.signature(gee.load_layers).parameters
         need({"host", "cache_only", "workers"} <= set(params), "data/gee.py is out of date (load_layers parameters)")
-        need(hasattr(gee, "request_plan"), "data/gee.py is out of date (no request_plan)")
+        need(hasattr(gee, "request_plan") and hasattr(gee, "resolve_project"), "data/gee.py is out of date (no request_plan / resolve_project)")
     except ImportError as exc:
         problems.append(f"data/gee.py: {exc}")
 
-    for module, names in (("overview", ("make_overview",)), ("viz", ("plot_overview", "plot_combo_ladder", "plot_layers")),
+    for module, names in (("overview", ("make_overview",)), ("summary", ("build_summary", "function_gaps")), ("firstpass", ("reason_map", "explain_unscored")),
+                          ("viz", ("plot_overview", "plot_combo_ladder", "plot_layers", "plot_reasons")),
                           ("grid", ("Grid",)), ("rasters", ("host_fractions_from_shares", "WORLDCOVER_CODES"))):
         try:
             mod = __import__(f"{__package__}.{module}", fromlist=["x"])
@@ -56,6 +90,10 @@ def check() -> list[str]:
 
 def assert_in_sync() -> None:
     problems = check()
+    if problems == [STALE_MESSAGE]:
+        raise RuntimeError(
+            STALE_MESSAGE + "\nRestart the kernel (Kernel > Restart) and run the notebook again from the top."
+        )
     if problems:
         raise RuntimeError(
             "The package files are not all from the same update:\n  - " + "\n  - ".join(problems)

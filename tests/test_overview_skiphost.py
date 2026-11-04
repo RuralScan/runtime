@@ -171,3 +171,15 @@ def test_overview_and_ladder_figures_are_written(result, tmp_path):
     plot_overview(ov, "SYNTHETIC overview", "test", out1)
     plot_combo_ladder(res, fp.combo_counts(res.space.n_combos), "SYNTHETIC ladder", "test", out2)
     assert out1.stat().st_size > 10_000 and out2.stat().st_size > 10_000
+
+
+def test_reason_map_figure_is_written(tmp_path):
+    pytest.importorskip("matplotlib")
+    from nbs_runtime.contract import load_package
+    from nbs_runtime.viz import plot_reasons
+
+    pkg = load_package()
+    space = build_level_space(pkg, pkg.policy("planted_terrain_soil_v1"))
+    out = tmp_path / "reasons.png"
+    plot_reasons(synthetic_layers(GRID, seed=3), space, GRID, "SYNTHETIC test", "", out)
+    assert out.stat().st_size > 10_000

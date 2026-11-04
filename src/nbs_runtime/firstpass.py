@@ -23,8 +23,9 @@ STATUS = {
     0: "scored",
     1: "excluded: no eligible host",
     2: "unknown: host",
-    3: "unknown: a score",
+    3: "unknown: a value falls in a gap of CIAT's function",
     4: "unknown: legal mask not assessed",
+    5: "unknown: no data (sea, water, no soil prediction)",
 }
 MODES = ("policy", "exploratory")
 
@@ -98,11 +99,13 @@ def run_first_pass(space: LevelSpace, layers: Layers, mode: str = "exploratory")
     index = _index(space, scores)
 
     status = np.zeros(fe.shape, dtype=np.uint8)
+    nodata = np.any([np.isnan(a) for a in (layers.slope_deg, layers.soc_g_kg, layers.ph)], axis=0)
     status[host_unknown] = 2
     if mode == "policy":
         status[host_true] = 4                       # legal mask not assessed -> unknown
     else:
-        status[host_true & ~scores_known] = 3
+        status[host_true & ~scores_known] = 3       # all inputs present but a value falls in a gap
+        status[host_true & nodata] = 5              # an input has no data at all
         status[host_true & scores_known] = 0
     status[host_false] = 1                          # no host: excluded whatever the rest is
 
@@ -126,3 +129,39 @@ def run_first_pass(space: LevelSpace, layers: Layers, mode: str = "exploratory")
             depth_range = np.where(np.isnan(stack).any(axis=0), np.nan,
                                    np.nanmax(stack, axis=0) - np.nanmin(stack, axis=0))
     return FirstPass(status, pete, combo, fe, mode, depth_index, depth_range)
+
+
+REASONS = {
+    0: "scored: all three values known and inside CIAT's functions",
+    1: "no data (sea, water or no soil prediction)",
+    2: "slope falls in a gap of CIAT's function",
+    3: "pH falls in a gap of CIAT's function",
+    4: "soil organic carbon falls in a gap of CIAT's function",
+    5: "more than one value falls in a gap",
+}
+
+
+def reason_map(space: LevelSpace, layers: Layers) -> np.ndarray:
+    """Why a cell is not scored, ignoring the host gate: no data, or a value that falls in a gap of a function.
+
+    A gap is a range of the variable where CIAT's function gives no score (the sources disagree, or no source
+    covers it). Cells whose inputs are all known and inside the functions get code 0.
+    """
+    inputs = (layers.slope_deg, layers.soc_g_kg, layers.ph)
+    scores = _scores(space, *inputs)
+    nodata = np.any([np.isnan(a) for a in inputs], axis=0)
+    gaps = [np.isnan(sc) & ~np.isnan(a) for sc, a in zip(scores, inputs, strict=True)]
+    n_gaps = sum(g.astype(int) for g in gaps)
+    out = np.zeros(nodata.shape, dtype=np.uint8)
+    out[nodata] = 1
+    ok = ~nodata
+    out[ok & (n_gaps >= 2)] = 5
+    out[ok & (n_gaps == 1) & gaps[0]] = 2          # slope
+    out[ok & (n_gaps == 1) & gaps[2]] = 3          # pH
+    out[ok & (n_gaps == 1) & gaps[1]] = 4          # soil organic carbon
+    return out
+
+
+def explain_unscored(space: LevelSpace, layers: Layers) -> dict[str, tuple[int, float]]:
+    codes = reason_map(space, layers)
+    return {REASONS[k]: (int((codes == k).sum()), float((codes == k).mean())) for k in REASONS}
