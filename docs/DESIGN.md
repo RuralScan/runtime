@@ -49,7 +49,7 @@ src/nbs_runtime/ contract.py responses.py gates.py aggregate.py   CIAT's calcula
                  data/                                             synthetic (tests) and gee (Earth Engine)
 scripts/         sync_upstream.py
 tests/           conformance, pin integrity, policy, plan, aoi, config, simulation
-notebooks/       01_agroforestry.ipynb: parameters cell, plan, simulation, saved results
+notebooks/       01_agroforestry (the index and the simulation) and 02_variable_audit (the variables, by group)
 docs/
 ```
 
@@ -118,6 +118,43 @@ and a rough time left. Each grid has its own cache folder, so changing the resol
 
 At 5 km the inputs are averaged over each cell before the functions are applied (a cell's mean slope, not the slope of each
 30 m cell), so the result is an overview and not a substitute for the 250 m calculation.
+
+## Variable audit
+
+`notebooks/02_variable_audit.ipynb` looks at the variables of an area one by one before they enter anything else: the dataset,
+where it was read, its range, the share of the area with no data, a map and a histogram, and a CHECK line when something looks wrong
+(values outside a plausible range catch a missing or doubled scale factor). Nothing is replaced by made-up data: a variable that
+cannot be loaded says why.
+
+The variables live in one catalog, `variables.py`, in four groups and their subgroups:
+
+| Group | Subgroups | Variables |
+|---|---|---|
+| Climate variables | Rainfall and temperature; Dryness | annual_precipitation, mean_annual_temperature, aridity_index |
+| Soil | Fertility; Water | soil_ph, soil_organic_carbon, soil_drainage |
+| Terrain and land | Topography; Land cover and vegetation | slope, land_cover, tree_canopy_cover |
+| Project risk | Access and energy; Legal and protection | accessibility_travel_time, distance_to_road, electrification_index, protected_area_status |
+
+The groups follow CIAT's own `group_id` (climatic, edaphic, topographic, land use, socio-economic, governance, infrastructure). The role of
+each variable in CIAT's package (a score, a gate, a mask, an operational scenario) is read from the pinned package at run time and shown
+in the summary, never written in the catalog, because those roles change when CIAT publishes a new version. A score that the approved
+policy does not use is labelled as such.
+
+Where a variable is read from:
+
+- **The Hugging Face dataset** (`dagudelo30/nbs-ruralscan-data`): WorldClim BIO1 and BIO12, the aridity index, HWSD v2 and the OSM roads. A
+  local copy with the same folder layout is used first (`DATA_ORDER`). Large global rasters are not downloaded whole: only the window over
+  the area is read over HTTP (`HF_MODE = "stream"`); `"download"` fetches whole files once. The HWSD attribute database and the road
+  shapefile are downloaded (they are small). HWSD stores soil-unit ids, so those are never averaged: the dominant unit of each cell is
+  taken and then turned into its drainage class.
+- **Earth Engine**: slope, soil, land cover (shared with the index calculation and its cache), tree canopy, travel time, night lights and
+  protected areas. Each layer is extracted once and cached.
+
+Not tested offline: reading over HTTP from Hugging Face and everything that calls Earth Engine. The logic that follows them (the raster
+window, the HWSD join, the road distance, the audit and the figures) is tested with synthetic files laid out like the dataset.
+
+Two points to confirm with CIAT: its default binding for precipitation and temperature points to CHELSA, while the dataset hosts WorldClim; and
+the protected-area share is context only, because CIAT states that a category alone does not establish a legal exclusion.
 
 ## Overview and sensitivity
 

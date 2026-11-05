@@ -35,6 +35,12 @@ Earth Engine: `pip install -e ".[gee,viz]"` and authenticate once. The notebook 
 optional quick check (section 3a) that pulls a small box and maps each layer, and saves every extracted layer in
 `cache/layers/` so Earth Engine is called once. See `docs/DESIGN.md` for why 250 m.
 
+`notebooks/02_variable_audit.ipynb` looks at the variables of an area one by one, in four groups (Climate variables, Soil, Terrain and
+land, Project risk): a map, a histogram, the range, the share with no data, and a CHECK line when something looks wrong. It reads the
+Hugging Face dataset (a local copy first, then only the window over the area) and Earth Engine. Install what it needs with
+`pip install -e ".[audit]"`; the notebook tells you if something is missing in the Python it runs in.
+
+
 ## How it connects to CIAT
 
 `upstream/` holds a read-only, hash-verified copy of one immutable package version

@@ -186,3 +186,112 @@ def plot_reasons(layers, space, grid: Grid, title: str, footnote: str = "", out_
     if out_path is not None:
         fig.savefig(out_path, dpi=150)
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Variable audit figures
+# ---------------------------------------------------------------------------
+def _category_colors(n: int, cmap: str):
+    import matplotlib.pyplot as plt
+
+    base = plt.get_cmap(cmap)
+    if base.N <= 20:                                   # a qualitative map: one colour per class
+        return [base(i % base.N) for i in range(n)]
+    return [base(i / max(n - 1, 1)) for i in range(n)]  # a continuous map: spread the classes along it
+
+
+def plot_variable_audit(audit, grid: Grid, out_path: Path | None = None):
+    """A map of one variable and its distribution (a histogram, or the share of each class)."""
+    import matplotlib.colors as mcolors
+    import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
+
+    s = audit.spec
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.4), gridspec_kw={"width_ratios": [1.6, 1]})
+    prefix = "SYNTHETIC TEST: " if audit.synthetic else ""
+    fig.suptitle(f"{prefix}{s.label} ({s.unit})", fontsize=13, fontweight="bold", x=0.02, ha="left")
+    sub = f"{s.group} > {s.subgroup}  ·  {s.dataset}  ·  {audit.origin or 'not loaded'}"
+    if audit.values is None:
+        ax1.axis("off")
+        ax2.axis("off")
+        ax1.text(0.0, 0.6, "Not loaded.\n\n" + audit.error, fontsize=11, wrap=True, va="center")
+        fig.text(0.02, 0.905, sub, fontsize=9, color="#555555")
+        return fig
+    v = audit.values
+    extent = grid.extent
+    if s.kind == "categorical" and s.class_labels:
+        codes = sorted(s.class_labels)
+        colors = _category_colors(len(codes), s.cmap)
+        idx = np.full(v.shape, np.nan)
+        for i, c in enumerate(codes):
+            idx[v == c] = i
+        ax1.imshow(np.ma.masked_invalid(idx), cmap=mcolors.ListedColormap(colors), vmin=-0.5, vmax=len(codes) - 0.5,
+                   extent=extent, origin="upper", interpolation="nearest")
+        present = [c for c in codes if c in audit.class_shares]
+        ax1.legend(handles=[mpatches.Patch(color=colors[codes.index(c)], label=s.class_labels[c]) for c in present],
+                   loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8, frameon=False)
+        shares = sorted(audit.class_shares.items(), key=lambda kv: kv[1])
+        ax2.barh([s.class_labels.get(c, str(c)) for c, _ in shares], [100 * f for _, f in shares],
+                 color=[colors[codes.index(c)] if c in codes else "#999999" for c, _ in shares])
+        ax2.set_xlabel("share of cells with data (%)")
+    else:
+        cm = plt.get_cmap(s.cmap).with_extremes(bad="#d9d9d9")
+        im = ax1.imshow(np.ma.masked_invalid(v), cmap=cm, extent=extent, origin="upper")
+        plt.colorbar(im, ax=ax1, fraction=0.046).set_label(s.unit)
+        known = v[np.isfinite(v)]
+        ax2.hist(known, bins=30, color="#0F6E56", edgecolor="white")
+        ax2.set_xlabel(s.unit)
+        ax2.set_ylabel("cells")
+        if s.plausible is not None:
+            for edge in s.plausible:
+                if known.min() <= edge <= known.max():
+                    ax2.axvline(edge, color="#D9822B", ls="--", lw=1)
+    ax1.set_xlabel("longitude")
+    ax1.set_ylabel("latitude")
+    fig.text(0.02, 0.905, sub, fontsize=9, color="#555555")
+    fig.tight_layout(rect=(0, 0, 1, 0.9))
+    if out_path is not None:
+        fig.savefig(out_path, dpi=140)
+    return fig
+
+
+def plot_group_overview(audits, grid: Grid, title: str, out_path: Path | None = None):
+    """Small maps of every variable of a group side by side."""
+    import matplotlib.colors as mcolors
+    import matplotlib.pyplot as plt
+
+    audits = list(audits)
+    n = len(audits)
+    cols = min(3, max(n, 1))
+    rows = -(-n // cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(5.2 * cols, 4.4 * rows), squeeze=False)
+    for ax in axes.ravel():
+        ax.axis("off")
+    for ax, a in zip(axes.ravel(), audits, strict=False):
+        ax.axis("on")
+        s = a.spec
+        ax.set_title(f"{s.label}\n({s.unit})", fontsize=10)
+        if a.values is None:
+            ax.text(0.5, 0.5, "not loaded", ha="center", va="center", transform=ax.transAxes)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            continue
+        if s.kind == "categorical" and s.class_labels:
+            codes = sorted(s.class_labels)
+            idx = np.full(a.values.shape, np.nan)
+            for i, c in enumerate(codes):
+                idx[a.values == c] = i
+            cm = mcolors.ListedColormap(_category_colors(len(codes), s.cmap))
+            ax.imshow(np.ma.masked_invalid(idx), cmap=cm, vmin=-0.5, vmax=len(codes) - 0.5, extent=grid.extent,
+                      origin="upper", interpolation="nearest")
+        else:
+            cm = plt.get_cmap(s.cmap).with_extremes(bad="#d9d9d9")
+            im = ax.imshow(np.ma.masked_invalid(a.values), cmap=cm, extent=grid.extent, origin="upper")
+            plt.colorbar(im, ax=ax, fraction=0.046)
+        ax.tick_params(labelsize=8)
+    prefix = "SYNTHETIC TEST: " if any(a.synthetic for a in audits) else ""
+    fig.suptitle(prefix + title, fontsize=14, fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    if out_path is not None:
+        fig.savefig(out_path, dpi=140)
+    return fig

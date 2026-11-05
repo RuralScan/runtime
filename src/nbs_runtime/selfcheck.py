@@ -76,8 +76,11 @@ def check() -> list[str]:
     except ImportError as exc:
         problems.append(f"data/gee.py: {exc}")
 
-    for module, names in (("overview", ("make_overview",)), ("summary", ("build_summary", "function_gaps")), ("firstpass", ("reason_map", "explain_unscored")),
-                          ("viz", ("plot_overview", "plot_combo_ladder", "plot_layers", "plot_reasons")),
+    for module, names in (("overview", ("make_overview",)), ("summary", ("build_summary", "function_gaps")),
+                          ("variables", ("CATALOG", "select", "contract_roles")), ("audit", ("audit_data", "summary_rows", "describe")),
+                          ("data.hf", ("raster_source", "read_raster_to_grid", "road_distance_km")),
+                          ("data.variables_loader", ("load_variable", "LoadContext")), ("firstpass", ("reason_map", "explain_unscored")),
+                          ("viz", ("plot_overview", "plot_combo_ladder", "plot_layers", "plot_reasons", "plot_variable_audit", "plot_group_overview")),
                           ("grid", ("Grid",)), ("rasters", ("host_fractions_from_shares", "WORLDCOVER_CODES"))):
         try:
             mod = __import__(f"{__package__}.{module}", fromlist=["x"])

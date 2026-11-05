@@ -12,3 +12,14 @@ jobs:
       - run: ruff check .
       - run: python scripts/sync_upstream.py --check
       - run: pytest -q
+  # the same tests again with the geospatial libraries installed, so the raster, road and figure tests run
+  # instead of being skipped
+  geo-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,geo,hf,viz]"
+      - run: pytest -q -rs

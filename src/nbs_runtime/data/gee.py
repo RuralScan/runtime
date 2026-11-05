@@ -324,3 +324,69 @@ def load_layers(grid: Grid, groups: Mapping[str, Sequence[int]], cache: LayerCac
     if cache is not None:
         notes.append(f"layer cache: {cache.dir}")
     return assemble_layers(slope, soc_raw, ph_raw, shares, groups, notes)
+
+
+# ---------------------------------------------------------------------------
+# Single-image variables for the variable audit (project risk, canopy cover)
+# ---------------------------------------------------------------------------
+def cached_arrays(cache: LayerCache | None, name: str, fetch, verbose: bool = True):
+    """Read a layer from the cache, or fetch it and save it. `fetch` returns {name: array}."""
+    if cache is not None:
+        got = cache.get(name)
+        if got is not None:
+            if verbose:
+                print(f"  {name}: from cache")
+            return got
+    arrays = fetch()
+    if cache is not None:
+        cache.put(name, arrays)
+    return arrays
+
+
+def _require_band(image, band: str, asset: str) -> None:
+    names = image.bandNames().getInfo()
+    if band not in names:
+        raise ValueError(f"band {band!r} is not in {asset}; its bands are {names}")
+
+
+def load_image_band(grid: Grid, image, native_deg: float, label: str, verbose: bool = True,
+                    max_input_pixels: int = MAX_TILE_INPUT_PIXELS, workers: int = 1) -> np.ndarray:
+    """One band of an Earth Engine image, averaged to the grid in tiles. Masked pixels come back as NaN."""
+    renamed = image.rename("v")
+    return _fetch(_aggregate(renamed, grid, native_deg), grid, native_deg, label, verbose, max_input_pixels, workers)["v"]
+
+
+def load_tree_canopy(grid: Grid, asset: str, band: str, **kw) -> np.ndarray:
+    import ee
+
+    img = ee.Image(asset)
+    _require_band(img, band, asset)
+    return load_image_band(grid, img.select(band), SRTM_NATIVE_DEG, "tree canopy", **kw)
+
+
+def load_accessibility(grid: Grid, asset: str, band: str, **kw) -> np.ndarray:
+    import ee
+
+    img = ee.Image(asset)
+    _require_band(img, band, asset)
+    return load_image_band(grid, img.select(band), 30.0 / 3600.0, "accessibility", **kw)
+
+
+def load_viirs(grid: Grid, asset: str, band: str, year: int, **kw) -> np.ndarray:
+    import ee
+
+    img = ee.ImageCollection(asset).filterDate(f"{year}-01-01", f"{year + 1}-01-01").first()
+    _require_band(img, band, asset)
+    return load_image_band(grid, img.select(band), 15.0 / 3600.0, f"night lights {year}", **kw)
+
+
+def load_wdpa_share(grid: Grid, asset: str, **kw) -> np.ndarray:
+    """Share of each cell inside a designated protected area (context only, not an assessed legal rule)."""
+    import ee
+
+    fc = (ee.FeatureCollection(asset)
+          .filter(ee.Filter.inList("STATUS", ["Designated", "Inscribed", "Established"]))
+          .filterBounds(ee.Geometry.Rectangle(list(grid.bbox))))
+    painted = (ee.Image.constant(0).byte().paint(fc, 1)
+               .setDefaultProjection(ee.Projection("EPSG:4326").atScale(30)))
+    return load_image_band(grid, painted, 30.0 / METRES_PER_DEGREE, "protected areas", **kw)

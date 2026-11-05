@@ -11,10 +11,11 @@ requires-python = ">=3.11"
 dependencies = []                      # core logic is pure Python on purpose
 
 [project.optional-dependencies]
-geo = ["numpy", "rasterio", "xarray", "rioxarray"]
+geo = ["numpy", "rasterio", "geopandas", "shapely", "pyproj"]
 gee = ["earthengine-api", "xee", "xarray"]
 hf  = ["huggingface_hub"]
 viz = ["matplotlib"]
+audit = ["rasterio", "geopandas", "shapely", "pyproj", "huggingface_hub", "matplotlib", "earthengine-api", "xee", "xarray"]
 dev = ["pytest", "ruff", "numpy"]
 
 [tool.setuptools.packages.find]
