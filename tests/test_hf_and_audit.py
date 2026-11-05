@@ -255,7 +255,7 @@ def test_earth_engine_variables_are_converted_once_and_combined(fake_ee, tmp_pat
     assert np.all(lc.values == 40.0) and lc.shares[40][0, 0] == pytest.approx(0.7)
     for vid in ("tree_canopy_cover", "accessibility_travel_time", "electrification_index", "protected_area_status"):
         assert load_variable(V.BY_ID[vid], ctx).ok
-    assert "viirs2023" in fake_ee
+    assert "viirsNone" in fake_ee                              # no year given: the latest the asset has
 
 
 def test_a_second_run_reads_the_cache_and_does_not_call_earth_engine_again(fake_ee, tmp_path):
@@ -343,3 +343,18 @@ def test_a_token_is_read_from_the_environment_or_the_env_file(monkeypatch, tmp_p
     assert hf.hf_token() == "from-file"
     monkeypatch.setenv("HF_TOKEN", "from-env")
     assert hf.hf_token() == "from-env"
+
+
+def test_an_earth_engine_error_is_reported_for_that_variable_and_does_not_stop_the_rest(fake_ee, monkeypatch, tmp_path):
+    class EEException(Exception):             # Earth Engine's own type: not an OSError, not a ValueError
+        pass
+
+    def boom(*a, **k):
+        raise EEException("Image.bandNames: Parameter 'image' is required and may not be null.")
+
+    monkeypatch.setattr(gee, "load_viirs", boom)
+    ctx = LoadContext(GRID, cache=LayerCache(tmp_path, GRID, gee.ASSET_IDS), verbose=False)
+    bad = load_variable(V.BY_ID["electrification_index"], ctx)
+    assert not bad.ok and bad.error.startswith("EEException: ") and "may not be null" in bad.error
+    assert load_variable(V.BY_ID["tree_canopy_cover"], ctx).ok                 # the next variable still loads
+    assert audit_data(bad).flags[0].startswith("not loaded")

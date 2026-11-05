@@ -240,3 +240,89 @@ def test_init_ee_explains_a_missing_project(monkeypatch):
     monkeypatch.setattr(gee, "REPO_ROOT", __import__("pathlib").Path("/nonexistent"))
     with pytest.raises(RuntimeError, match="EE_PROJECT"):
         gee.init_ee()
+
+
+# ---- night lights: a year the asset does not have, and Earth Engine's own exceptions ----
+
+def _fake_ee(monkeypatch, years, bands=("average",)):
+    import sys
+    import types
+    from datetime import UTC, datetime
+
+    class EEException(Exception):
+        pass
+
+    seen = {}
+
+    class Image:
+        def __init__(self, ok=True):
+            self.ok = ok
+
+        def bandNames(self):
+            def info():
+                if not self.ok:
+                    raise EEException("Image.bandNames: Parameter 'image' is required and may not be null.")
+                return list(bands)
+
+            return types.SimpleNamespace(getInfo=info)
+
+        def select(self, band):
+            return self
+
+    class Collection:
+        def __init__(self, asset):
+            self.window = None
+
+        def aggregate_array(self, prop):
+            ms = [datetime(y, 1, 1, tzinfo=UTC).timestamp() * 1000 for y in years]
+            return types.SimpleNamespace(getInfo=lambda: ms)
+
+        def filterDate(self, a, b):
+            seen["window"] = (a, b)
+            self.window = (a, b)
+            return self
+
+        def first(self):
+            return Image(ok=bool(years))
+
+    fake = types.ModuleType("ee")
+    fake.EEException = EEException
+    fake.ImageCollection = Collection
+    fake.Image = lambda asset: Image()
+    monkeypatch.setitem(sys.modules, "ee", fake)
+    monkeypatch.setattr(gee, "load_image_band", lambda grid, img, native, label, **k: np.full(grid.shape, 0.5))
+    return seen, EEException
+
+
+def test_night_lights_use_the_latest_year_the_asset_has_by_default(monkeypatch):
+    seen, _ = _fake_ee(monkeypatch, range(2012, 2022))
+    assert gee.collection_years("x") == list(range(2012, 2022))
+    out = gee.load_viirs(GRID, "x", "average")
+    assert out.shape == GRID.shape and seen["window"] == ("2021-01-01", "2022-01-01")
+
+
+def test_a_year_the_asset_does_not_have_is_explained(monkeypatch):
+    _fake_ee(monkeypatch, range(2012, 2022))
+    with pytest.raises(ValueError) as e:
+        gee.load_viirs(GRID, "NOAA/VIIRS/DNB/ANNUAL_V21", "average", 2023)
+    msg = str(e.value)
+    assert "no composite for 2023" in msg and "2012 to 2021" in msg and "VIIRS_YEAR" in msg
+
+
+def test_an_empty_collection_and_an_unreadable_image_say_what_happened(monkeypatch):
+    _fake_ee(monkeypatch, [])
+    with pytest.raises(ValueError, match="has no images"):
+        gee.load_viirs(GRID, "x", "average")
+
+    import sys
+
+    _fake_ee(monkeypatch, [2020])
+    ee = sys.modules["ee"]
+    image = ee.ImageCollection("x").first()                         # an image with the band "average"
+    gee._require_band(image, "average", "x")
+    with pytest.raises(ValueError, match="band 'avg_rad' is not in"):
+        gee._require_band(image, "avg_rad", "x")
+    _fake_ee(monkeypatch, [])
+    empty = sys.modules["ee"].ImageCollection("x").first()          # what an empty filter returns: a null image
+    with pytest.raises(ValueError, match="could not read"):
+        gee._require_band(empty, "average", "x")

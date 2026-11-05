@@ -344,7 +344,13 @@ def cached_arrays(cache: LayerCache | None, name: str, fetch, verbose: bool = Tr
 
 
 def _require_band(image, band: str, asset: str) -> None:
-    names = image.bandNames().getInfo()
+    import ee
+
+    try:
+        names = image.bandNames().getInfo()
+    except ee.EEException as exc:
+        raise ValueError(f"Earth Engine could not read {asset}: {exc}. Check the asset id, that it has an image "
+                         "for what was asked, and that your project can read it.") from exc
     if band not in names:
         raise ValueError(f"band {band!r} is not in {asset}; its bands are {names}")
 
@@ -372,9 +378,28 @@ def load_accessibility(grid: Grid, asset: str, band: str, **kw) -> np.ndarray:
     return load_image_band(grid, img.select(band), 30.0 / 3600.0, "accessibility", **kw)
 
 
-def load_viirs(grid: Grid, asset: str, band: str, year: int, **kw) -> np.ndarray:
+def collection_years(asset: str) -> list[int]:
+    """The years that have an image in a collection of annual composites (one cheap call to Earth Engine)."""
+    from datetime import UTC, datetime
+
     import ee
 
+    times = ee.ImageCollection(asset).aggregate_array("system:time_start").getInfo()
+    return sorted({datetime.fromtimestamp(t / 1000, UTC).year for t in times})
+
+
+def load_viirs(grid: Grid, asset: str, band: str, year: int | None = None, **kw) -> np.ndarray:
+    """Night-time lights of one year. With year=None, the latest year the asset has."""
+    import ee
+
+    years = collection_years(asset)
+    if not years:
+        raise ValueError(f"{asset} has no images")
+    if year is None:
+        year = years[-1]
+    if year not in years:
+        raise ValueError(f"{asset} has no composite for {year}; it has {years[0]} to {years[-1]} ({years}). "
+                         "Set VIIRS_YEAR to one of those years, or to None for the latest.")
     img = ee.ImageCollection(asset).filterDate(f"{year}-01-01", f"{year + 1}-01-01").first()
     _require_band(img, band, asset)
     return load_image_band(grid, img.select(band), 15.0 / 3600.0, f"night lights {year}", **kw)

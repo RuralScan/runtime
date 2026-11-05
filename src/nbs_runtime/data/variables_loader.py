@@ -120,12 +120,13 @@ def _gee_image(spec: VarSpec, ctx: LoadContext) -> VariableData:
     elif spec.id == "accessibility_travel_time":
         fetch = lambda: {"v": gee.load_accessibility(grid, d["asset"], d["band"], **kw)}
     elif spec.id == "electrification_index":
-        fetch = lambda: {"v": gee.load_viirs(grid, d["asset"], d["band"], int(d["year"]), **kw)}
+        year = None if d.get("year") is None else int(d["year"])
+        fetch = lambda: {"v": gee.load_viirs(grid, d["asset"], d["band"], year, **kw)}
     elif spec.id == "protected_area_status":
         fetch = lambda: {"v": gee.load_wdpa_share(grid, d["asset"], **kw)}
     else:
         raise KeyError(f"no loader for {spec.id}")
-    name = f"{spec.id}_{_slug(d['asset'])}" + (f"_{d['year']}" if "year" in d else "")
+    name = f"{spec.id}_{_slug(d['asset'])}" + (f"_{d.get('year') or 'latest'}" if "year" in d else "")
     return VariableData(spec, gee.cached_arrays(cache, name, fetch, ctx.verbose)["v"], origin)
 
 
@@ -139,7 +140,9 @@ def load_variable(spec: VarSpec, ctx: LoadContext) -> VariableData:
         return VariableData(spec, values, "synthetic", ["SYNTHETIC: a pipeline test, not real data"], synthetic=True)
     try:
         data = _LOADERS[spec.source](spec, ctx)
-    except (OSError, ImportError, ValueError, KeyError, RuntimeError) as exc:
+    except Exception as exc:        # noqa: BLE001
+        # Earth Engine raises its own exception types (not OSError or ValueError), and a failure of one variable
+        # must be reported with its reason, not stop the notebook. Ctrl-C is not an Exception and still stops it.
         return VariableData(spec, None, error=f"{type(exc).__name__}: {exc}")
     shape = data.values.shape if data.values is not None else None
     if shape is not None and shape != ctx.grid.shape:

@@ -113,9 +113,10 @@ CATALOG: tuple[VarSpec, ...] = (
                  "The file covers Haiti and the Dominican Republic."),
     VarSpec("electrification_index", "Night-time light (electrification proxy)", "Project risk", "Access and energy",
             "nW/cm2/sr", GEE_IMAGE, "VIIRS annual night-time lights", 500,
-            {"asset": "NOAA/VIIRS/DNB/ANNUAL_V21", "band": "average", "year": 2023}, "inferno",
+            {"asset": "NOAA/VIIRS/DNB/ANNUAL_V21", "band": "average", "year": None}, "inferno",
             plausible=(0.0, 500.0),
-            note="Most rural land is near 0 and cities stand out."),
+            note="Most rural land is near 0 and cities stand out. By default it uses the latest year the asset has; "
+                 "set VIIRS_YEAR to choose another."),
     VarSpec("protected_area_status", "Share of the cell inside a protected area", "Project risk",
             "Legal and protection", "share 0-1", GEE_IMAGE, "WDPA (World Database on Protected Areas)", 30,
             {"asset": "WCMC/WDPA/current/polygons"}, "Purples", plausible=(0.0, 1.0), cost="slow",
