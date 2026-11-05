@@ -27,6 +27,15 @@ DEFAULT_REPO = "dagudelo30/nbs-ruralscan-data"
 ORIGINS = ("local", "hf-stream", "hf-download")
 
 
+# files a raster format cannot be read without. An ESRI BIL raster has no dimensions of its own: they are in the .hdr
+SIDECARS = {".bil": (".hdr",)}
+
+
+def sidecars_of(rel: str) -> list[str]:
+    stem, dot, ext = rel.rpartition(".")
+    return [f"{stem}{e}" for e in SIDECARS.get(f".{ext.lower()}", ())] if dot else []
+
+
 class FileNotAvailable(FileNotFoundError):
     """A file was not found in any of the places it was looked for."""
 
@@ -102,22 +111,31 @@ def raster_source(rel: str, order: Sequence[str] = ("local", "hf"), local_roots:
     """What rasterio should open for a global raster, and where it came from.
 
     Local first. Otherwise `stream` opens the file over HTTP and reads only the window needed, `download`
-    fetches it once into the Hugging Face cache.
+    fetches it once into the Hugging Face cache. Companion files a format needs (the .hdr of a .bil) come with it.
     """
     if mode not in ("stream", "download"):
         raise ValueError("mode must be 'stream' or 'download'")
+    needs = sidecars_of(rel)
     problems = []
     for where in order:
         if where == "local":
             found = find_local(rel, local_roots)
-            if found is not None:
-                return str(found), "local"
-            problems.append(f"{rel} not found locally")
+            if found is None:
+                problems.append(f"{rel} not found locally")
+                continue
+            missing = [n for n in needs if find_local(n, local_roots) is None]
+            if missing:
+                problems.append(f"the local copy of {rel} is missing {missing}, which the format needs")
+                continue
+            return str(found), "local"
         elif where == "hf":
             if mode == "stream":
                 return "/vsicurl/" + hf_url(rel, repo), "hf-stream"
             try:
-                return str(download(rel, repo)), "hf-download"
+                path = download(rel, repo)
+                for n in needs:
+                    download(n, repo)
+                return str(path), "hf-download"
             except (ImportError, OSError) as exc:
                 problems.append(f"could not download {rel}: {exc}")
     raise FileNotAvailable("; ".join(problems))
@@ -160,17 +178,27 @@ def read_raster_to_grid(source: str, grid: Grid, resampling: str = "average", sc
     r = grid.resolution_deg
     dst_transform = Affine(r, 0.0, minx, 0.0, -r, maxy)
     dst = np.full(grid.shape, np.nan, dtype=np.float32)
-    env = {"GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR", "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif,.tiff,.bil,.hdr,.stx",
-           "GDAL_HTTP_MAX_RETRY": "3", "GDAL_HTTP_RETRY_DELAY": "2"}
+    env = {"CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif,.tiff,.bil,.hdr,.stx", "GDAL_HTTP_MAX_RETRY": "3",
+           "GDAL_HTTP_RETRY_DELAY": "2"}
+    if source.lower().endswith((".tif", ".tiff")):
+        # skip the directory listing: a GeoTIFF is one file. Not for formats with companion files (a .bil needs its
+        # .hdr), which GDAL can only find when it is allowed to look next to the file.
+        env["GDAL_DISABLE_READDIR_ON_OPEN"] = "EMPTY_DIR"
     token = hf_token()
     if token and source.startswith("/vsicurl/"):                       # a private dataset
         env["GDAL_HTTP_HEADERS"] = f"Authorization: Bearer {token}"
-    with rasterio.Env(**env), rasterio.open(source) as src:
-        src_nodata = src.nodata
-        reproject(
-            source=rasterio.band(src, 1), destination=dst, dst_transform=dst_transform, dst_crs="EPSG:4326",
-            src_crs=src.crs or "EPSG:4326", src_nodata=src_nodata, dst_nodata=np.nan, resampling=methods[resampling],
-        )
+    try:
+        with rasterio.Env(**env), rasterio.open(source) as src:
+            src_nodata = src.nodata
+            reproject(
+                source=rasterio.band(src, 1), destination=dst, dst_transform=dst_transform, dst_crs="EPSG:4326",
+                src_crs=src.crs or "EPSG:4326", src_nodata=src_nodata, dst_nodata=np.nan, resampling=methods[resampling],
+            )
+    except OSError as exc:
+        if source.startswith("/vsicurl/"):
+            raise OSError(f"could not read {source} over HTTP: {exc}. Check the network, or set HF_MODE = 'download' "
+                          "to fetch the file once instead.") from exc
+        raise
     out = dst.astype(float)
     for value in nodata:
         out[np.isclose(out, value)] = np.nan

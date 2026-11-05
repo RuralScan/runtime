@@ -32,6 +32,16 @@ def write_tif(path, array, bbox=BBOX, nodata=-9999.0, dtype="float32"):
     return path
 
 
+def write_bil(path, ids):
+    """An ESRI BIL raster with the .hdr that holds its dimensions, over the test box (100 x 100 cells)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ids.astype("<u2").tofile(path)
+    path.with_suffix(".hdr").write_text(
+        "BYTEORDER      I\nLAYOUT         BIL\nNROWS          100\nNCOLS          100\nNBANDS         1\nNBITS          16\n"
+        "BANDROWBYTES   200\nTOTALROWBYTES  200\nPIXELTYPE      UNSIGNEDINT\nULXMAP         -72.995\nULYMAP         18.995\n"
+        "XDIM           0.01\nYDIM           0.01\nNODATA         0\n")
+
+
 # ---------------------------------------------------------------- file finding
 def test_local_copy_is_found_with_or_without_the_raw_folder(tmp_path):
     f = tmp_path / "raw" / "hwsd_v2" / "HWSD2.hdr"
@@ -191,7 +201,7 @@ def local_dataset(tmp_path):
     write_tif(root / "raw/global_aridity_index_v3/ai_v31_yr.tif", 8200.0 + ramp)
     smu = np.full((h, w), 101.0)
     smu[:, 60:] = 102.0
-    write_tif(root / "raw/hwsd_v2/HWSD2.bil", smu)                 # a stand-in raster in the same place
+    write_bil(root / "raw/hwsd_v2/HWSD2.bil", smu.astype(int))     # a real ESRI BIL with its .hdr
     make_hwsd_db(root / "raw/hwsd_v2/HWSD2.sqlite")
     make_roads(root / "raw/osm_road_network/gis_osm_roads_free_1.shp")
     return root
@@ -358,3 +368,100 @@ def test_an_earth_engine_error_is_reported_for_that_variable_and_does_not_stop_t
     assert not bad.ok and bad.error.startswith("EEException: ") and "may not be null" in bad.error
     assert load_variable(V.BY_ID["tree_canopy_cover"], ctx).ok                 # the next variable still loads
     assert audit_data(bad).flags[0].startswith("not loaded")
+
+
+# ---------------------------------------------------------------- streaming over HTTP (the path that reads Hugging Face)
+@pytest.fixture
+def http_dataset(tmp_path):
+    """A small HTTP server with Range support (as the Hugging Face CDN has), serving a folder."""
+    import functools
+    import http.server
+    import os
+    import re
+    import threading
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def send_head(self):
+            path = self.translate_path(self.path)
+            if not os.path.isfile(path):
+                self.send_error(404)
+                return None
+            size = os.path.getsize(path)
+            rng = self.headers.get("Range")
+            f = open(path, "rb")                                      # noqa: SIM115  (closed by the base class)
+            if rng:
+                m = re.match(r"bytes=(\d+)-(\d*)", rng)
+                a = int(m.group(1))
+                b = min(int(m.group(2)) if m.group(2) else size - 1, size - 1)
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {a}-{b}/{size}")
+                self.send_header("Content-Length", str(b - a + 1))
+                f.seek(a)
+                self._left = b - a + 1
+            else:
+                self.send_response(200)
+                self.send_header("Content-Length", str(size))
+                self._left = size
+            self.send_header("Accept-Ranges", "bytes")
+            self.end_headers()
+            return f
+
+        def copyfile(self, src, dst):
+            left = self._left
+            while left > 0:
+                chunk = src.read(min(65536, left))
+                if not chunk:
+                    break
+                dst.write(chunk)
+                left -= len(chunk)
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(tmp_path)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield tmp_path, f"/vsicurl/http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+def test_a_geotiff_is_read_over_http_reading_only_its_window(http_dataset):
+    root, base = http_dataset
+    arr = np.tile(np.arange(100, dtype="float32"), (100, 1))
+    write_tif(root / "ai.tif", arr)
+    out = hf.read_raster_to_grid(f"{base}/ai.tif", GRID)
+    assert out.shape == GRID.shape and np.isfinite(out).all()
+    assert out[3, 0] < out[3, 5] < out[3, 10]
+
+
+def test_a_bil_raster_is_read_over_http_with_its_hdr(http_dataset):
+    """The regression: with the directory listing switched off, GDAL could not find the .hdr and the .bil failed."""
+    root, base = http_dataset
+    ids = 100 + (np.arange(100)[None, :] // 25) + 10 * (np.arange(100)[:, None] // 25)
+    write_bil(root / "HWSD2.bil", ids)
+    out = hf.read_raster_to_grid(f"{base}/HWSD2.bil", GRID, "mode")
+    assert out.shape == GRID.shape
+    got = set(np.unique(out[np.isfinite(out)]).astype(int))
+    assert got and got <= set(np.unique(ids).astype(int))            # whole soil-unit ids, never averaged
+
+
+def test_a_failed_http_read_says_what_to_try(http_dataset):
+    _root, base = http_dataset
+    with pytest.raises(OSError, match="HF_MODE = 'download'"):
+        hf.read_raster_to_grid(f"{base}/missing.bil", GRID, "mode")
+
+
+def test_a_bil_needs_its_hdr_wherever_it_is_found(tmp_path, monkeypatch):
+    assert hf.sidecars_of("raw/hwsd_v2/HWSD2.bil") == ["raw/hwsd_v2/HWSD2.hdr"]
+    assert hf.sidecars_of("raw/x/a.tif") == []
+    root = tmp_path / "data"
+    write_bil(root / "raw/hwsd_v2/HWSD2.bil", np.ones((100, 100)))
+    (root / "raw/hwsd_v2/HWSD2.hdr").unlink()
+    with pytest.raises(hf.FileNotAvailable, match="missing .*HWSD2.hdr"):
+        hf.raster_source("raw/hwsd_v2/HWSD2.bil", ("local",), [root])
+    (root / "raw/hwsd_v2/HWSD2.hdr").write_text("x")
+    assert hf.raster_source("raw/hwsd_v2/HWSD2.bil", ("local",), [root])[1] == "local"
+    asked = []
+    monkeypatch.setattr(hf, "download", lambda rel, repo=hf.DEFAULT_REPO: asked.append(rel) or tmp_path / "f")
+    _src, origin = hf.raster_source("raw/hwsd_v2/HWSD2.bil", ("hf",), mode="download")
+    assert origin == "hf-download" and asked == ["raw/hwsd_v2/HWSD2.bil", "raw/hwsd_v2/HWSD2.hdr"]
