@@ -182,9 +182,15 @@ kept as a layer), and a cell with no eligible host but some unknown host is unkn
 `data.order = ["local", "hf", "gee"]` records where a layer is looked for. The Hugging Face dataset (WorldClim,
 aridity, HWSD v2, OSM roads) is not an input of this first pass. This is our reading of CIAT's brief, to confirm.
 
-## Open decisions (owner)
+## Reading baseline results
 
-- Haiti applicability of the India pools and the official AOI boundary and its source (method lead, Diego).
-- Adopt or replace the SoilGrids 0-30 cm proposal; record a decision reference (method lead).
+`FirstPass.baseline_index` contains the partial terrain-and-soil score at each scored cell. `Overview.baseline_index` contains its mean over scored cells in each displayed block. Both accept the keyword `baseline_index=` and expose the same writable array through the historical attribute. Dataclass exports and Python pickles retain their original field layout for existing readers.
+
+Use `comparison.statistics` for the baseline comparison measures, for example `comparison.statistics["spearman_baseline_vs_median"]`. It returns a snapshot. The existing mutable `comparison.stats` dictionary retains its original keys. New notebook manifests include both spellings under `comparison` for readers of either version. The saved raster is available under its existing `ciat_index` archive key.
+
+## Inputs awaiting confirmation
+
+- Haiti applicability of the India pools and the official AOI boundary and its source.
+- Adopt or replace the SoilGrids 0-30 cm proposal; record a decision reference.
 - Assessed legal mask; until then the policy returns "unknown" for every pixel.
-- Host inputs, GEE adapters, band and unit contracts (Diego, Brayden).
+- Host inputs, GEE adapters, band and unit contracts.

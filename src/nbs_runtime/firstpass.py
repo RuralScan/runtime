@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ._result_fields import accept_baseline_keyword
 from .rasters import level_index, score_array
 from .simulate import LevelSpace
 
@@ -50,15 +51,25 @@ class Layers:
             raise ValueError(f"layers are not on one grid: shapes {sorted(shapes)}")
 
 
+@accept_baseline_keyword("pete")
 @dataclass
 class FirstPass:
     status: np.ndarray                      # uint8, codes in STATUS
-    pete: np.ndarray                        # CIAT index, NaN unless scored
+    pete: np.ndarray                        # Archived field backing baseline_index
     combo_id: np.ndarray                    # class-combination id, -1 unless scored
     eligible_fraction: np.ndarray
     mode: str
     depth_index: dict[str, np.ndarray] | None = None
     depth_range: np.ndarray | None = None   # max - min of the index across the three depths
+
+    @property
+    def baseline_index(self) -> np.ndarray:
+        """Partial terrain-and-soil score. Unscored cells are NaN."""
+        return self.pete
+
+    @baseline_index.setter
+    def baseline_index(self, value: np.ndarray) -> None:
+        self.pete = value
 
     @property
     def scored(self) -> np.ndarray:
@@ -115,7 +126,7 @@ def run_first_pass(space: LevelSpace, layers: Layers, mode: str = "exploratory")
     if scored.any():
         flat = np.ravel_multi_index(tuple(i[scored] for i in idx), tuple(len(lv) for lv in space.levels))
         combo[scored] = flat
-    pete = np.where(scored, index, np.nan)
+    baseline_index = np.where(scored, index, np.nan)
 
     depth_index = depth_range = None
     if layers.soc_by_depth and layers.ph_by_depth:
@@ -128,7 +139,7 @@ def run_first_pass(space: LevelSpace, layers: Layers, mode: str = "exploratory")
             warnings.simplefilter("ignore", RuntimeWarning)
             depth_range = np.where(np.isnan(stack).any(axis=0), np.nan,
                                    np.nanmax(stack, axis=0) - np.nanmin(stack, axis=0))
-    return FirstPass(status, pete, combo, fe, mode, depth_index, depth_range)
+    return FirstPass(status, baseline_index, combo, fe, mode, depth_index, depth_range)
 
 
 REASONS = {

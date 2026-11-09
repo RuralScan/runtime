@@ -29,10 +29,10 @@ def plot_comparison(fp: FirstPass, comp: Comparison, grid: Grid, title: str,
         cb = plt.colorbar(im, ax=ax, fraction=0.046)
         cb.set_label(label)
 
-    draw(axes[0, 0], fp.pete, "CIAT: partial terrain-and-soil index", cmap_idx, 0, 1, "index (0-1)")
+    draw(axes[0, 0], fp.baseline_index, "CIAT: partial terrain-and-soil index", cmap_idx, 0, 1, "index (0-1)")
     draw(axes[0, 1], comp.median, "Simulation: median", cmap_idx, 0, 1, "index (0-1)")
     draw(axes[0, 2], comp.width, "Simulation: 5-95% width", "magma", 0, max(0.5, np.nanmax(comp.width) if np.isfinite(comp.width).any() else 0.5), "range of the index")
-    diff = comp.median - fp.pete
+    diff = comp.median - fp.baseline_index
     lim = max(0.1, float(np.nanmax(np.abs(diff)))) if np.isfinite(diff).any() else 0.1
     draw(axes[1, 0], diff, "Median minus CIAT", "RdBu", -lim, lim, "difference")
     draw(axes[1, 1], comp.p_top, "Chance of being in the top third", "viridis", 0, 1, "probability")
@@ -93,11 +93,11 @@ def plot_overview(ov, title: str, footnote: str = "", out_path: Path | None = No
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 8.6))
-    diff = ov.median - ov.ciat
+    diff = ov.median - ov.baseline_index
     lim = max(0.1, float(np.nanmax(np.abs(diff)))) if np.isfinite(diff).any() else 0.1
     wmax = max(0.5, float(np.nanmax(ov.width))) if np.isfinite(ov.width).any() else 0.5
     panels = [
-        (ov.ciat, "CIAT: partial terrain-and-soil index", "YlGn", 0, 1, "mean index of scored cells"),
+        (ov.baseline_index, "CIAT: partial terrain-and-soil index", "YlGn", 0, 1, "mean index of scored cells"),
         (ov.median, "Simulation: median", "YlGn", 0, 1, "mean of the medians"),
         (ov.width, "How much the class numbers matter\n(5-95% width)", "magma", 0, wmax, "range of the index"),
         (diff, "Median minus CIAT", "RdBu", -lim, lim, "difference"),
