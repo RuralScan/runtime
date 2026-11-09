@@ -1,121 +1,175 @@
-"""Pin a generated T4 developer package from CIAT/nbs_ruralscan into ./upstream.
+"""Fetch an immutable scoring package from GitHub, or verify the local pin offline."""
 
-Only an allowlist of machine-readable files is copied (about 1 MB). A package is
-immutable upstream, so a pin is (repository, commit, package path) plus file hashes.
-
-  python scripts/sync_upstream.py --ref <commit> --package agroforestry-t4/developer-v0.1.5
-  python scripts/sync_upstream.py --check          # verify files against PIN.json
-  python scripts/sync_upstream.py --list           # list package versions on CIAT main
-"""
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import re
 import sys
 import urllib.request
 from datetime import date
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from urllib.parse import quote
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from nbs_runtime._scoring_pin import (
+    FILES,
+    package_dir,
+    publisher_root,
+    read_pinned,
+    relative_path,
+    sha256,
+)
 
 REPO = "CIAT/nbs_ruralscan"
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM = ROOT / "upstream"
-ALLOWLIST = [
-    "developer_contract.json",
-    "run_contract.json",
-    "conformance_examples.json",
-    "policy_conformance.json",
-    "selection_template.json",
-    "manifest.json",
-    "VERSION",
-]
 
 
 def _get(url: str) -> bytes:
-    with urllib.request.urlopen(url, timeout=60) as r:
-        return r.read()
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return response.read()
 
 
-def _sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def _commit(repo: str, ref: str) -> str:
+    if re.fullmatch(r"[0-9a-fA-F]{40}", ref):
+        return ref.lower()
+    result = json.loads(_get(f"https://api.github.com/repos/{repo}/commits/{quote(ref, safe='')}"))
+    sha = result.get("sha") if isinstance(result, dict) else None
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError(f"Could not resolve {ref!r} to a commit in {repo}")
+    return sha
 
 
-def sync(ref: str, package: str) -> int:
-    dest = UPSTREAM / package
-    dest.mkdir(parents=True, exist_ok=True)
-    base = f"https://raw.githubusercontent.com/{REPO}/{ref}/handoff/{package}"
-    files, blobs = {}, {}
-    for name in ALLOWLIST:
-        blobs[name] = _get(f"{base}/{name}")
-        files[name] = _sha(blobs[name])
-    # Cross-check against the hashes CIAT published inside the package itself.
-    manifest = json.loads(blobs["manifest.json"])
-    problems = [
-        f"{n}: differs from the upstream manifest"
-        for n, h in manifest.get("output_sha256", {}).items()
-        if n in files and n != "manifest.json" and files[n] != h
-    ]
-    if problems:
-        print("REFUSING to pin:", *problems, sep="\n  ")
+def sync(ref: str, package: str, *, repo=REPO, source_root="handoff", upstream=UPSTREAM) -> int:
+    try:
+        source_root = publisher_root(repo, source_root)
+        dest = package_dir(upstream, package)
+        commit = _commit(repo, ref)
+        base = f"https://raw.githubusercontent.com/{repo}/{commit}/{source_root}/{package}"
+        upstream.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(dir=upstream, prefix=".sync-") as scratch:
+            stage = Path(scratch)
+            pending = stage / package
+            pending.mkdir(parents=True)
+            hashes = {}
+            for name in FILES:
+                data = _get(f"{base}/{name}")
+                (pending / name).write_bytes(data)
+                hashes[name] = sha256(data)
+            manifest = json.loads((pending / "manifest.json").read_bytes())
+            if not isinstance(manifest, dict):
+                raise TypeError("Invalid scoring-package manifest")
+            pin = {
+                "source_repo": repo,
+                "ref": commit,
+                "package": package,
+                "package_version": manifest.get("package_version"),
+                "contract_version": manifest.get("contract_version"),
+                "package_source_commit": manifest.get("source_commit"),
+                "pinned_on": date.today().isoformat(),
+                "files": hashes,
+            }
+            if source_root != "handoff":
+                pin["source_root"] = source_root
+            pin_path = stage / "PIN.json"
+            pin_path.write_text(json.dumps(pin, indent=2) + "\n", encoding="utf-8")
+            read_pinned(stage)
+
+            # Package directories are immutable. Expose a complete directory before
+            # switching the selector, so existing readers can finish on their pin.
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.exists():
+                try:
+                    pending.rename(dest)
+                except OSError:
+                    if not dest.is_dir():
+                        raise
+            if pending.exists():
+                for name in FILES:
+                    path = dest / name
+                    if (
+                        path.is_symlink()
+                        or not path.is_file()
+                        or sha256(path.read_bytes()) != hashes[name]
+                    ):
+                        raise ValueError(f"Existing immutable package differs: {package}/{name}")
+            pin_path.replace(upstream / "PIN.json")
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"Cannot pin scoring package: {exc}", file=sys.stderr)
         return 1
-    for name, data in blobs.items():
-        (dest / name).write_bytes(data)
-    pin = {
-        "source_repo": REPO,
-        "ref": ref,
-        "package": package,
-        "package_version": manifest.get("package_version"),
-        "contract_version": manifest.get("contract_version"),
-        "package_source_commit": manifest.get("source_commit"),
-        "pinned_on": date.today().isoformat(),
-        "files": files,
-    }
-    (UPSTREAM / "PIN.json").write_text(json.dumps(pin, indent=2) + "\n", encoding="utf-8")
-    print(f"Pinned {package} @ {ref[:12]} ({len(files)} files)")
+    print(f"Pinned {package} from {repo} @ {commit[:12]} ({len(FILES)} files)")
     return 0
 
 
-def check() -> int:
-    pin_path = UPSTREAM / "PIN.json"
-    if not pin_path.exists():
-        print("No upstream/PIN.json")
-        return 1
-    pin = json.loads(pin_path.read_text(encoding="utf-8"))
-    bad = []
-    for name, h in pin["files"].items():
-        p = UPSTREAM / pin["package"] / name
-        if not p.exists() or _sha(p.read_bytes()) != h:
-            bad.append(name)
-    if bad:
-        print("Pinned files changed or missing:", *bad, sep="\n  ")
+def check(upstream=UPSTREAM) -> int:
+    try:
+        pin, *_ = read_pinned(upstream)
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"Invalid scoring pin: {exc}", file=sys.stderr)
         return 1
     print(f"OK: {pin['package']} @ {pin['ref'][:12]}")
     return 0
 
 
-def list_versions() -> int:
-    url = f"https://api.github.com/repos/{REPO}/contents/handoff/agroforestry-t4?ref=main"
+def list_versions(*, repo=REPO, source_root="handoff", family="agroforestry-t4", ref="main") -> int:
     try:
+        source_root = publisher_root(repo, source_root)
+        path = f"{source_root}/{relative_path(family)}"
+        url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={quote(ref, safe='')}"
         items = json.loads(_get(url))
-    except (OSError, ValueError) as exc:  # anonymous API calls are rate-limited
-        print(f"Could not list versions ({exc}). Browse "
-              f"https://github.com/{REPO}/tree/main/handoff/agroforestry-t4 instead.")
+        if not isinstance(items, list) or any(
+            not isinstance(item, dict) or not isinstance(item.get("name"), str) for item in items
+        ):
+            raise ValueError(f"Expected a directory at {path}")
+        versions = sorted(
+            i["name"]
+            for i in items
+            if i.get("type") == "dir" and i["name"].startswith("developer-v")
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"Could not list scoring packages: {exc}", file=sys.stderr)
         return 1
-    print(*sorted(i["name"] for i in items if i["name"].startswith("developer-v")), sep="\n")
+    print(*versions, sep="\n")
     return 0
 
 
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--ref", help="Publisher commit, tag or branch. Pins record the full commit SHA."
+    )
+    parser.add_argument("--package", default="agroforestry-t4/developer-v0.1.5")
+    parser.add_argument("--repo", default=REPO, help="GitHub publisher as owner/repository")
+    parser.add_argument(
+        "--source-root", default="handoff", help="Package directory in the publisher repository"
+    )
+    parser.add_argument(
+        "--upstream", type=Path, default=UPSTREAM, help="Local scoring-package store"
+    )
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--check", action="store_true", help="Verify the installed pin offline")
+    modes.add_argument(
+        "--list", action="store_true", help="List versions of the selected package family"
+    )
+    args = parser.parse_args(argv)
+    if args.check:
+        return check(args.upstream)
+    if args.list:
+        return list_versions(
+            repo=args.repo,
+            source_root=args.source_root,
+            family=args.package.rsplit("/", 1)[0],
+            ref=args.ref or "main",
+        )
+    if not args.ref:
+        parser.error("--ref is required to pin")
+    return sync(
+        args.ref, args.package, repo=args.repo, source_root=args.source_root, upstream=args.upstream
+    )
+
+
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    ap.add_argument("--ref", help="CIAT commit SHA to pin")
-    ap.add_argument("--package", default="agroforestry-t4/developer-v0.1.5")
-    ap.add_argument("--check", action="store_true")
-    ap.add_argument("--list", action="store_true")
-    a = ap.parse_args()
-    if a.check:
-        sys.exit(check())
-    if a.list:
-        sys.exit(list_versions())
-    if not a.ref:
-        ap.error("--ref is required to pin")
-    sys.exit(sync(a.ref, a.package))
+    sys.exit(main())

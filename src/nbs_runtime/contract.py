@@ -5,11 +5,11 @@ Entry points are developer_contract.json (rows, function options) and run_contra
 """
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from ._scoring_pin import read_pinned
 
 UPSTREAM = Path(__file__).resolve().parents[2] / "upstream"
 
@@ -88,34 +88,20 @@ class Package:
         raise KeyError(f"{function_id!r} is not an option of {rule_id!r}")
 
 
-def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def verify_pin(upstream: Path = UPSTREAM) -> list[str]:
-    """Return a list of problems; empty means the vendored files match PIN.json."""
-    pin_path = upstream / "PIN.json"
-    if not pin_path.exists():
-        return ["upstream/PIN.json is missing; run scripts/sync_upstream.py"]
-    pin = json.loads(pin_path.read_text(encoding="utf-8"))
-    problems = []
-    for name, expected in pin["files"].items():
-        p = upstream / pin["package"] / name
-        if not p.exists():
-            problems.append(f"{name}: missing")
-        elif _sha(p) != expected:
-            problems.append(f"{name}: hash differs from PIN.json")
-    return problems
+    """List integrity or compatibility problems with the active scoring package."""
+    try:
+        read_pinned(upstream)
+    except (OSError, ValueError, TypeError) as exc:
+        return str(exc).splitlines()
+    return []
 
 
 def load_package(upstream: Path = UPSTREAM) -> Package:
-    problems = verify_pin(upstream)
-    if problems:
-        raise RuntimeError("Pinned package is not intact: " + "; ".join(problems))
-    pin = json.loads((upstream / "PIN.json").read_text(encoding="utf-8"))
-    root = upstream / pin["package"]
-    contract = json.loads((root / "developer_contract.json").read_text(encoding="utf-8"))
-    run_contract = json.loads((root / "run_contract.json").read_text(encoding="utf-8"))
+    try:
+        pin, root, contract, run_contract = read_pinned(upstream)
+    except (OSError, ValueError, TypeError) as exc:
+        raise RuntimeError(f"Pinned package is not intact: {exc}") from exc
     rows = {r["rule_id"]: r for r in contract["rows"]}
     return Package(root, pin, contract, run_contract, rows)
 
