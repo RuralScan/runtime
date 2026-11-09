@@ -8,6 +8,30 @@ Current scope: the approved **planted-silvoarable first pass** (agroforestry): s
 soil organic carbon 25%, pH 25%, plus a host gate and a legal-exclusion mask. It is a
 partial terrain-and-soil index, not complete agroforestry suitability.
 
+## Read a six-practice recipe release
+
+Install the runtime with `pip install .`. With an authorised copy of the release store on disk, run the inspection command.
+
+```bash
+python -m nbs_runtime.recipe_release --store /path/to/recipe-releases
+```
+
+The command verifies the files against the bundled [recipe pin](src/nbs_runtime/recipe_pin.json) and prints the source revision, each practice's table counts and its spatial execution status. The store must contain `generations/<release_id>/manifest.json` and the matching `files/` tree. A copy of that generation alone is sufficient. The directory can be read-only.
+
+```python
+from pathlib import Path
+from nbs_runtime.recipe_release import load_recipe_release
+
+release = load_recipe_release(Path("/path/to/recipe-releases"))
+wetland_effects = release.table("wetland_management", "T6")
+water_review = release.report("water_harvesting_conservation", "T4_readiness.json")
+print(release.release_id, len(wetland_effects), water_review["implementation_readiness"])
+```
+
+Each practice supplies its T0 definition and authored settings, T3, T4, T6 and T6E tables, and synthesis and readiness reports. An empty table is a valid result. A held T4 mapping documents a reviewed decision and has no selectable scoring function. Consult the readiness report before interpreting its rows. The spatial first-pass notebook uses the separate developer package described below.
+
+To inspect a different version, pass `--pin /path/to/trusted-pin.json` or the Python keyword `pin=Path(...)`. Obtain that pin independently of the supplied release files. It specifies the release ID, source revision and complete practice list. Keep the pin alongside the analysis that used it.
+
 ## Quickstart
 
 ```bash
