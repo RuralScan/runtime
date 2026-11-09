@@ -39,10 +39,23 @@ def test_comparison_only_fills_scored_pixels(run):
 
 
 def test_the_simulation_tracks_ciat_ranks_closely_but_not_exactly(run):
-    stats = run[2].stats
-    assert 0.8 < stats["spearman_pete_vs_median"] <= 1.0
+    stats = run[2].statistics
+    assert 0.8 < stats["spearman_baseline_vs_median"] <= 1.0
     assert 0.5 < stats["top_third_agreement"] <= 1.0
     assert stats["n_scored"] == int(run[0].scored.sum())
+
+
+def test_comparison_exports_original_and_neutral_measures(run):
+    comp = run[2]
+    original = [
+        "spearman_pete_vs_median", "pete_top_third_threshold", "share_pete_top_third",
+        "share_of_pete_top_third_that_is_fragile", "share_pete_above_p95",
+    ]
+    assert [key for key in comp.stats if "pete" in key] == original
+    statistics = comp.statistics
+    assert list(statistics) == [key.replace("pete", "baseline") for key in comp.stats]
+    for key in original:
+        assert statistics[key.replace("pete", "baseline")] == comp.stats[key]
 
 
 def test_a_pixel_better_in_every_class_has_a_higher_chance_of_the_top_third(run, pkg):

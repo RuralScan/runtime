@@ -139,19 +139,19 @@ def build_summary(cfg: RunConfig, pkg: Package, plan: Plan, layers: Layers, fp: 
     lines.append("")
 
     if scored:
-        s = comp.stats
-        pete = fp.pete[fp.scored]
+        s = comp.statistics
+        baseline = fp.baseline_index[fp.scored]
         lines += [
             "## CIAT's index and how much the class numbers matter", "",
-            (f"- CIAT's index over the scored cells: from {float(pete.min()):.2f} to {float(pete.max()):.2f} "
-            f"(median {float(np.median(pete)):.2f})."),
+            (f"- CIAT's index over the scored cells: from {float(baseline.min()):.2f} to {float(baseline.max()):.2f} "
+            f"(median {float(np.median(baseline)):.2f})."),
             (f"- Rank agreement between CIAT's index and the simulation median (Spearman): "
-            f"{s['spearman_pete_vs_median']:.2f}."),
+            f"{s['spearman_baseline_vs_median']:.2f}."),
             (f"- Width of the simulated 5-95% range of one cell: median {s['width_median']:.2f}, 90th percentile "
             f"{s['width_p90']:.2f} (on a 0-1 scale)."),
             (f"- Membership of the top third: the two methods agree for {_pct(s['top_third_agreement'])} of the scored cells; "
             f"{_pct(s['share_uncertain_top_third'])} have an uncertain top third (chance between 20% and 80%)."),
-            (f"- {_pct(s['share_of_pete_top_third_that_is_fragile'])} of the cells in CIAT's top third have less than a "
+            (f"- {_pct(s['share_of_baseline_top_third_that_is_fragile'])} of the cells in CIAT's top third have less than a "
             "50% chance of being there once the class numbers vary."), "",
         ]
 

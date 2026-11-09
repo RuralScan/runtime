@@ -44,7 +44,7 @@ def test_level_index_maps_scores_and_marks_unknown():
     assert list(idx) == [0, 3, -1, -1]
 
 
-def test_peter_worked_example_for_depths():
+def test_worked_example_for_soil_depths():
     # DATASET_INPUTS.md: SOC 12, 9, 6 g/kg -> 8 g/kg; pH 5, 6, 7 -> 6.333333
     soc = thickness_weighted([np.array([12.0]), np.array([9.0]), np.array([6.0])])
     ph = thickness_weighted([np.array([5.0]), np.array([6.0]), np.array([7.0])])
@@ -119,7 +119,7 @@ def test_first_pass_agrees_with_the_pixel_rule_in_aggregate_combine(pkg, space, 
         got = {0: "scored", 1: "excluded", 2: "unknown", 3: "unknown", 4: "unknown", 5: "unknown"}[int(fp.status[0, 0])]
         assert got == want["status"]
         if want["status"] == "scored":
-            assert fp.pete[0, 0] == pytest.approx(want["score"])
+            assert fp.baseline_index[0, 0] == pytest.approx(want["score"])
 
 
 def test_policy_mode_scores_nothing_until_the_legal_mask_is_assessed(space):
@@ -135,7 +135,7 @@ def test_scored_pixels_have_a_combo_and_everything_else_does_not(space):
     lay = synthetic_layers(Grid.from_bbox((-74.5, 18.0, -71.6, 20.1), 5000), seed=3)
     fp = run_first_pass(space, lay, "exploratory")
     assert (fp.combo_id[fp.scored] >= 0).all() and (fp.combo_id[~fp.scored] == -1).all()
-    assert np.isfinite(fp.pete[fp.scored]).all() and np.isnan(fp.pete[~fp.scored]).all()
+    assert np.isfinite(fp.baseline_index[fp.scored]).all() and np.isnan(fp.baseline_index[~fp.scored]).all()
     assert sum(fp.combo_counts(space.n_combos).values()) == int(fp.scored.sum())
 
 

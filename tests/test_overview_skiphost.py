@@ -51,13 +51,13 @@ def test_overview_covers_the_grid_and_hides_thin_blocks(result):
     ov = make_overview(fp, comp, grid, 5000, min_scored_share=0.5)
     assert ov.factor == 20 and ov.shape == (47, 65)
     assert ov.extent[0] == grid.bbox[0] and ov.extent[3] == grid.bbox[3]
-    assert np.isnan(ov.ciat[ov.coverage < 0.5]).all()
+    assert np.isnan(ov.baseline_index[ov.coverage < 0.5]).all()
     full = ov.coverage >= 0.5
-    assert np.isfinite(ov.ciat[full]).all()
+    assert np.isfinite(ov.baseline_index[full]).all()
     assert ((ov.p_top[full] >= 0) & (ov.p_top[full] <= 1)).all()
     assert (ov.p05[full] <= ov.median[full] + 1e-9).all()
     strict = make_overview(fp, comp, grid, 5000, min_scored_share=0.95)
-    assert np.isfinite(strict.ciat).sum() <= np.isfinite(ov.ciat).sum()
+    assert np.isfinite(strict.baseline_index).sum() <= np.isfinite(ov.baseline_index).sum()
 
 
 def test_overview_must_be_a_whole_multiple_of_the_resolution(result):
@@ -77,8 +77,8 @@ def test_a_block_mean_is_the_mean_of_its_scored_cells(result):
                 break
         if r is not None:
             break
-    blk = fp.pete[r * 20:(r + 1) * 20, c * 20:(c + 1) * 20]
-    assert ov.ciat[r, c] == pytest.approx(np.nanmean(blk))
+    blk = fp.baseline_index[r * 20:(r + 1) * 20, c * 20:(c + 1) * 20]
+    assert ov.baseline_index[r, c] == pytest.approx(np.nanmean(blk))
 
 
 # ---- host gate skipped, and cache-only ----

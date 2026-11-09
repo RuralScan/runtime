@@ -5,7 +5,7 @@
 [run]
 nbs_id = "agroforestry"
 system = "planted_silvoarable"
-policy_id = "planted_terrain_soil_v1"   # approved by Pete 2026-10-27 (CIAT issue #455)
+policy_id = "planted_terrain_soil_v1"   # scoring policy recorded 2026-10-27 (CIAT issue #455)
 mode = "exploratory"                    # exploratory: legal mask not applied, holds stay open; policy: all decisions recorded
 
 [aoi]
