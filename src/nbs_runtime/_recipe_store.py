@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import ntpath
 import os
 import re
 import stat
@@ -45,6 +46,12 @@ def _inventory(manifest: bytes, release_id: str) -> dict:
     return files
 
 
+def _reserved_component(name: str) -> bool:
+    if hasattr(ntpath, "isreserved"):
+        return ntpath.isreserved(name)
+    return PureWindowsPath(name).is_reserved()  # Python 3.11 and 3.12
+
+
 def _member_paths(inventory: dict) -> set[str]:
     """Return the complete expected tree, including directories, in portable spelling."""
     expected: set[str] = set()
@@ -57,7 +64,7 @@ def _member_paths(inventory: dict) -> set[str]:
                 or part in {".", ".."}
                 or part.endswith((".", " "))
                 or _BAD_COMPONENT.search(part)
-                or PureWindowsPath(part).is_reserved()
+                or _reserved_component(part)
             ):
                 raise ValueError(f"Invalid recipe path {name!r}")
             path = "/".join(parts[:index])
