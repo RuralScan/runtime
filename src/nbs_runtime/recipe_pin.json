@@ -1,0 +1,12 @@
+{
+  "release_id": "0964c9577fda9ba6226c1f33ead0e42d5c0b1500941f3202099850f1a649ae6a",
+  "source_revision": "2023cb82c94a93120600a7feb17d8cd1e12ce54f",
+  "practices": [
+    "agroforestry",
+    "forest_restoration",
+    "mangrove_restoration",
+    "riparian_buffer",
+    "water_harvesting_conservation",
+    "wetland_management"
+  ]
+}

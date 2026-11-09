@@ -21,6 +21,9 @@ dev = ["pytest", "ruff", "numpy"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+nbs_runtime = ["recipe_pin.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
