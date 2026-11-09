@@ -65,17 +65,20 @@ Hugging Face dataset (a local copy first, then only the window over the area) an
 `pip install -e ".[audit]"`; the notebook tells you if something is missing in the Python it runs in.
 
 
-## How it connects to CIAT
+<a id="how-it-connects-to-ciat"></a>
 
-`upstream/` holds a read-only, hash-verified copy of one immutable package version
-(about 0.7 MB). `upstream/PIN.json` records the CIAT commit and file hashes. To adopt a
-newer package see [docs/DESIGN.md](docs/DESIGN.md#updating-from-ciat).
+## Scoring package
 
-## Rules (from the CIAT handoff)
+The spatial notebook reads the seven verified files selected by `upstream/PIN.json`.
+The pin records the publisher repository, exact commit, package version and file
+hashes. Check the selected package offline with `python scripts/sync_upstream.py --check`.
+To inspect another publisher, use a separate local store. [Publisher and update instructions](docs/DESIGN.md#updating-the-scoring-package)
 
-- Never edit `upstream/`; report contract gaps to CIAT instead of fixing values here.
+<a id="rules-from-the-ciat-handoff"></a>
+
+## Scoring rules
+
+- Make corrections in the source package and refresh the pin after review.
 - Unknown is never zero. Masks carry no weight. No per-pixel weight renormalisation.
 - Operational factors (roads, market, tenure) stay outside the suitability score.
 - Record the package pin, function fingerprints and decision references with every run.
-
-Contact: Diego Agudelo, d.agudelo@cgiar.org
