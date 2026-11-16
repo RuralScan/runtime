@@ -131,8 +131,8 @@ def test_class_codes_are_never_averaged(tmp_path):
     path = write_tif(tmp_path / "c.tif", arr)
     out = hf.read_raster_to_grid(str(path), GRID, "mode")
     assert set(np.unique(out[np.isfinite(out)])) <= {10.0, 40.0, 80.0}
-    with pytest.raises(ValueError):
-        hf.read_raster_to_grid(str(path), GRID, "cubic")
+    with pytest.raises(KeyError):
+        hf.read_raster_to_grid(str(path), GRID, "avg")
 
 
 # ---------------------------------------------------------------- HWSD v2

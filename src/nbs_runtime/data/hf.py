@@ -165,10 +165,7 @@ def read_raster_to_grid(source: str, grid: Grid, resampling: str = "average", sc
     from rasterio.transform import Affine
     from rasterio.warp import reproject
 
-    methods = {"average": Resampling.average, "mode": Resampling.mode, "nearest": Resampling.nearest,
-               "bilinear": Resampling.bilinear}
-    if resampling not in methods:
-        raise ValueError(f"resampling must be one of {sorted(methods)}")
+    method = Resampling[resampling]          # rasterio's names: average, mode, nearest, bilinear, max, ...
     minx, _, _, maxy = grid.bbox
     r = grid.resolution_deg
     dst_transform = Affine(r, 0.0, minx, 0.0, -r, maxy)
@@ -187,7 +184,7 @@ def read_raster_to_grid(source: str, grid: Grid, resampling: str = "average", sc
             src_nodata = src.nodata
             reproject(
                 source=rasterio.band(src, 1), destination=dst, dst_transform=dst_transform, dst_crs="EPSG:4326",
-                src_crs=src.crs or "EPSG:4326", src_nodata=src_nodata, dst_nodata=np.nan, resampling=methods[resampling],
+                src_crs=src.crs or "EPSG:4326", src_nodata=src_nodata, dst_nodata=np.nan, resampling=method,
             )
     except OSError as exc:
         if source.startswith("/vsicurl/"):
