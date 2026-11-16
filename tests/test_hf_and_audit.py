@@ -69,7 +69,7 @@ def test_raster_source_prefers_local_then_streams_from_the_hub(tmp_path):
     assert origin == "hf-stream" and src == "/vsicurl/https://huggingface.co/datasets/dagudelo30/nbs-ruralscan-data/resolve/main/raw/y/b.tif"
     with pytest.raises(ValueError):
         hf.raster_source("raw/y/b.tif", mode="copy")
-    with pytest.raises(hf.FileNotAvailable, match="not found locally"):
+    with pytest.raises(hf.FileNotAvailable, match="not found"):
         hf.raster_source("raw/y/b.tif", ("local",), [tmp_path])
 
 
@@ -474,3 +474,11 @@ def test_a_bil_needs_its_hdr_wherever_it_is_found(tmp_path, monkeypatch):
     monkeypatch.setattr(hf, "download", lambda rel, repo=hf.DEFAULT_REPO: asked.append(rel) or tmp_path / "f")
     _src, origin = hf.raster_source(V.HF + "raw/hwsd_v2/HWSD2.bil", ("hf",), mode="download")
     assert origin == "hf-download" and asked == ["raw/hwsd_v2/HWSD2.bil", "raw/hwsd_v2/HWSD2.hdr"]
+
+
+def test_every_derive_step_in_the_registry_exists():
+    from nbs_runtime.data import variables_loader as vl
+
+    for v in V.CATALOG:
+        known = vl._STEPS.keys() | (gee.IMAGE_STEPS.keys() if v.source == V.GEE else {None})
+        assert v.derive in known, f"{v.id}: unknown derive step {v.derive!r}"

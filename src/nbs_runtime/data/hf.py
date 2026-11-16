@@ -27,7 +27,6 @@ from ..grid import Grid
 DEFAULT_REPO = "dagudelo30/nbs-ruralscan-data"
 HF_PREFIX = "hf://datasets/"
 REMOTE_PREFIXES = ("s3://", "gs://", "az://", "http://", "https://")
-ORIGINS = ("local", "hf-stream", "hf-download", "remote")
 
 
 def split_hf(path: str) -> tuple[str | None, str]:
@@ -98,16 +97,11 @@ def resolve_file(path: str, order: Sequence[str] = ("local", "hf"), local_roots:
     for where in order:
         if where == "local":
             found = find_local(rel, local_roots)
-            if found is not None:
-                for s in siblings:                                           # a shapefile needs .shx, .dbf, ...
-                    if find_local(s, local_roots) is None:
-                        problems.append(f"local copy of {rel} is missing its companion file {s}")
-                        found = None
-                        break
-                if found is not None:
-                    return found, "local"
-            else:
-                problems.append(f"{rel} not found under {[str(r) for r in local_roots] or 'any local root'}")
+            missing = [s for s in siblings if find_local(s, local_roots) is None]    # a shapefile needs .shx, .dbf, ...
+            if found and not missing:
+                return found, "local"
+            problems.append(f"local copy of {rel} is missing {missing}" if found else
+                            f"{rel} not found under {[str(r) for r in local_roots] or 'any local root'}")
         elif where == "hf" and repo:
             try:
                 got = download(rel, repo)
@@ -121,40 +115,25 @@ def resolve_file(path: str, order: Sequence[str] = ("local", "hf"), local_roots:
 
 def raster_source(path: str, order: Sequence[str] = ("local", "hf"), local_roots: Sequence[Path | str] = (),
                   mode: str = "stream") -> tuple[str, str]:
-    """What rasterio should open for a global raster, and where it came from.
+    """What rasterio should open for a raster, and where it came from.
 
-    A full URL (s3://, gs://, az://, https://) is opened as is. Local first. Otherwise `stream` opens the file over HTTP and reads only the window needed, `download`
-    fetches it once into the Hugging Face cache. Companion files a format needs (the .hdr of a .bil) come with it.
+    A full URL (s3://, gs://, https://, ...) is opened as is. Otherwise as resolve_file, except that `stream` reads
+    only the needed window of a Hugging Face file over HTTP instead of downloading it. Companion files come along.
     """
     if mode not in ("stream", "download"):
         raise ValueError("mode must be 'stream' or 'download'")
     if path.startswith(REMOTE_PREFIXES):             # rasterio opens these itself and reads only the window
         return path, "remote"
     repo, rel = split_hf(path)
-    needs = sidecars_of(rel)
-    problems = []
-    for where in order:
-        if where == "local":
-            found = find_local(rel, local_roots)
-            if found is None:
-                problems.append(f"{rel} not found locally")
-                continue
-            missing = [n for n in needs if find_local(n, local_roots) is None]
-            if missing:
-                problems.append(f"the local copy of {rel} is missing {missing}, which the format needs")
-                continue
-            return str(found), "local"
-        elif where == "hf" and repo:
-            if mode == "stream":
-                return "/vsicurl/" + hf_url(rel, repo), "hf-stream"
-            try:
-                path = download(rel, repo)
-                for n in needs:
-                    download(n, repo)
-                return str(path), "hf-download"
-            except (ImportError, OSError) as exc:
-                problems.append(f"could not download {rel}: {exc}")
-    raise FileNotAvailable("; ".join(problems))
+    stream = mode == "stream" and repo and "hf" in order
+    try:
+        found, origin = resolve_file(path, [o for o in order if not (stream and o == "hf")], local_roots,
+                                     sidecars_of(path))
+        return str(found), origin
+    except FileNotAvailable:
+        if stream:
+            return "/vsicurl/" + hf_url(rel, repo), "hf-stream"
+        raise
 
 
 def check_access(repo: str = DEFAULT_REPO, rel: str = "raw/hwsd_v2/HWSD2.hdr", timeout: float = 20.0) -> str:

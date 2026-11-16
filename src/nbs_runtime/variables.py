@@ -52,7 +52,7 @@ class VarSpec:
     native_m: float                    # native resolution of the source, metres
     band: str | None = None
     scale: float = 1.0                 # stored value x scale = value in `unit`
-    resample: str = "mean"             # "mean" for continuous values, "mode" for class ids
+    resample: str = "average"          # rasterio name: "average" for continuous values, "mode" for class ids
     derive: str | None = None          # named derivation step (data/variables_loader.py); None = read as is
     params: Mapping[str, Any] = field(default_factory=dict)    # extra inputs of the derivation step
     cmap: str = "viridis"

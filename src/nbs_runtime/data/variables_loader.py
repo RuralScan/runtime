@@ -55,8 +55,7 @@ def _kw(ctx: LoadContext) -> dict:
 def _file(spec: VarSpec, ctx: LoadContext) -> VariableData:
     """A raster file, read onto the grid and converted to its unit."""
     src, origin = hf.raster_source(spec.path, ctx.order, ctx.local_roots, ctx.hf_mode)
-    resampling = "average" if spec.resample == "mean" else spec.resample
-    return VariableData(spec, hf.read_raster_to_grid(src, ctx.grid, resampling, scale=spec.scale), origin)
+    return VariableData(spec, hf.read_raster_to_grid(src, ctx.grid, spec.resample, scale=spec.scale), origin)
 
 
 def _gee(spec: VarSpec, ctx: LoadContext) -> VariableData:
@@ -101,7 +100,7 @@ def _class_shares(spec: VarSpec, ctx: LoadContext) -> VariableData:
 def _hwsd_drainage(spec: VarSpec, ctx: LoadContext) -> VariableData:
     src, origin = hf.raster_source(spec.path, ctx.order, ctx.local_roots, ctx.hf_mode)
     db, _ = hf.resolve_file(spec.params["sqlite"], ctx.order, ctx.local_roots)
-    smu = hf.read_raster_to_grid(src, ctx.grid, "mode")                      # whole soil-unit ids, never averaged
+    smu = hf.read_raster_to_grid(src, ctx.grid, spec.resample)     # "mode": whole soil-unit ids, never averaged
     lookup = hf.hwsd_drainage_lookup(db)
     values = hf.drainage_from_smu(smu, lookup)
     note = f"{len(lookup):,} soil units with a drainage class in the attribute database"
