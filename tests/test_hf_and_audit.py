@@ -55,6 +55,11 @@ def test_local_copy_is_found_with_or_without_the_raw_folder(tmp_path):
     assert hf.find_local("raw/none.tif", [tmp_path]) is None
 
 
+def test_raster_source_opens_full_urls_as_is(tmp_path):
+    for url in ("s3://bucket/a.tif", "https://example.org/b.tif"):
+        assert hf.raster_source(url, ("local", "hf"), [tmp_path]) == (url, "remote")
+
+
 def test_raster_source_prefers_local_then_streams_from_the_hub(tmp_path):
     f = tmp_path / "raw" / "x" / "a.tif"
     f.parent.mkdir(parents=True)

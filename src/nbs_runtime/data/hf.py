@@ -106,15 +106,20 @@ def resolve_file(rel: str, order: Sequence[str] = ("local", "hf"), local_roots: 
     raise FileNotAvailable("; ".join(problems) or f"{rel}: no place to look in (order={tuple(order)})")
 
 
+REMOTE_PREFIXES = ("s3://", "gs://", "az://", "http://", "https://")
+
+
 def raster_source(rel: str, order: Sequence[str] = ("local", "hf"), local_roots: Sequence[Path | str] = (),
                   repo: str = DEFAULT_REPO, mode: str = "stream") -> tuple[str, str]:
     """What rasterio should open for a global raster, and where it came from.
 
-    Local first. Otherwise `stream` opens the file over HTTP and reads only the window needed, `download`
+    A full URL (s3://, gs://, az://, https://) is opened as is. Local first. Otherwise `stream` opens the file over HTTP and reads only the window needed, `download`
     fetches it once into the Hugging Face cache. Companion files a format needs (the .hdr of a .bil) come with it.
     """
     if mode not in ("stream", "download"):
         raise ValueError("mode must be 'stream' or 'download'")
+    if rel.startswith(REMOTE_PREFIXES):              # rasterio opens these itself and reads only the window
+        return rel, "remote"
     needs = sidecars_of(rel)
     problems = []
     for where in order:
