@@ -63,7 +63,6 @@ class SimulationSpec:
 @dataclass(frozen=True)
 class DataSpec:
     order: tuple[str, ...] = ("local", "hf", "gee")
-    hf_repo: str = "dagudelo30/nbs-ruralscan-data"
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,8 @@
-"""Reading the layers hosted in the Hugging Face dataset (or a local copy of it).
+"""Reading file layers: from a local copy, a Hugging Face dataset (`hf://datasets/<owner>/<name>/<path>`) or any URL.
 
-A file is looked for in the order the caller gives ("local", then "hf"). A local copy keeps the same folder layout
-as the dataset (`raw/<dataset folder>/<file>`), under any root you list in `local_roots`.
+A file is looked for in the order the caller gives ("local", then "hf"). A local copy keeps the dataset's folder
+layout (`raw/<dataset folder>/<file>`) under any root you list in `local_roots`. s3://, gs://, az:// and https://
+paths are opened directly by GDAL.
 
 Large global rasters are not downloaded whole. They are opened over HTTP with GDAL's /vsicurl/ and only the window
 that covers the area is read (`stream`). If streaming does not work on a network, `download` fetches the whole file
@@ -24,7 +25,17 @@ import numpy as np
 from ..grid import Grid
 
 DEFAULT_REPO = "dagudelo30/nbs-ruralscan-data"
-ORIGINS = ("local", "hf-stream", "hf-download")
+HF_PREFIX = "hf://datasets/"
+REMOTE_PREFIXES = ("s3://", "gs://", "az://", "http://", "https://")
+ORIGINS = ("local", "hf-stream", "hf-download", "remote")
+
+
+def split_hf(path: str) -> tuple[str | None, str]:
+    """(repo, path inside it) for an hf://datasets/ path; (None, path) for anything else."""
+    if not path.startswith(HF_PREFIX):
+        return None, path
+    owner, name, rel = path[len(HF_PREFIX):].split("/", 2)
+    return f"{owner}/{name}", rel
 
 
 # files a raster format cannot be read without. An ESRI BIL raster has no dimensions of its own: they are in the .hdr
@@ -75,12 +86,14 @@ def download(rel: str, repo: str = DEFAULT_REPO) -> Path:
     return Path(hf_hub_download(repo_id=repo, filename=rel, repo_type="dataset"))
 
 
-def resolve_file(rel: str, order: Sequence[str] = ("local", "hf"), local_roots: Sequence[Path | str] = (),
-                 repo: str = DEFAULT_REPO, siblings: Sequence[str] = ()) -> tuple[Path, str]:
+def resolve_file(path: str, order: Sequence[str] = ("local", "hf"), local_roots: Sequence[Path | str] = (),
+                 siblings: Sequence[str] = ()) -> tuple[Path, str]:
     """A file on disk, local first and then downloaded. `siblings` are companion files kept next to it.
 
     Returns (path, origin) with origin "local" or "hf-download".
     """
+    repo, rel = split_hf(path)
+    siblings = [split_hf(s)[1] for s in siblings]
     problems = []
     for where in order:
         if where == "local":
@@ -95,22 +108,19 @@ def resolve_file(rel: str, order: Sequence[str] = ("local", "hf"), local_roots: 
                     return found, "local"
             else:
                 problems.append(f"{rel} not found under {[str(r) for r in local_roots] or 'any local root'}")
-        elif where == "hf":
+        elif where == "hf" and repo:
             try:
-                path = download(rel, repo)
+                got = download(rel, repo)
                 for s in siblings:
                     download(s, repo)
-                return path, "hf-download"
+                return got, "hf-download"
             except (ImportError, OSError) as exc:
                 problems.append(f"could not download {rel} from {repo}: {exc}")
     raise FileNotAvailable("; ".join(problems) or f"{rel}: no place to look in (order={tuple(order)})")
 
 
-REMOTE_PREFIXES = ("s3://", "gs://", "az://", "http://", "https://")
-
-
-def raster_source(rel: str, order: Sequence[str] = ("local", "hf"), local_roots: Sequence[Path | str] = (),
-                  repo: str = DEFAULT_REPO, mode: str = "stream") -> tuple[str, str]:
+def raster_source(path: str, order: Sequence[str] = ("local", "hf"), local_roots: Sequence[Path | str] = (),
+                  mode: str = "stream") -> tuple[str, str]:
     """What rasterio should open for a global raster, and where it came from.
 
     A full URL (s3://, gs://, az://, https://) is opened as is. Local first. Otherwise `stream` opens the file over HTTP and reads only the window needed, `download`
@@ -118,8 +128,9 @@ def raster_source(rel: str, order: Sequence[str] = ("local", "hf"), local_roots:
     """
     if mode not in ("stream", "download"):
         raise ValueError("mode must be 'stream' or 'download'")
-    if rel.startswith(REMOTE_PREFIXES):              # rasterio opens these itself and reads only the window
-        return rel, "remote"
+    if path.startswith(REMOTE_PREFIXES):             # rasterio opens these itself and reads only the window
+        return path, "remote"
+    repo, rel = split_hf(path)
     needs = sidecars_of(rel)
     problems = []
     for where in order:
@@ -133,7 +144,7 @@ def raster_source(rel: str, order: Sequence[str] = ("local", "hf"), local_roots:
                 problems.append(f"the local copy of {rel} is missing {missing}, which the format needs")
                 continue
             return str(found), "local"
-        elif where == "hf":
+        elif where == "hf" and repo:
             if mode == "stream":
                 return "/vsicurl/" + hf_url(rel, repo), "hf-stream"
             try:

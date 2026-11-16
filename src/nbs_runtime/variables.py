@@ -20,7 +20,9 @@ GROUPS = ("Climate variables", "Soil", "Terrain and land", "Project risk")
 
 # where a variable is read from
 GEE = "gee"      # an Earth Engine asset
-FILE = "file"    # a file in the Hugging Face dataset, or a local copy of it (DataConfig.order decides which)
+FILE = "file"    # a file: hf://datasets/..., s3://, https://, or a local path; a local copy wins (DataSpec.order)
+
+HF = "hf://datasets/dagudelo30/nbs-ruralscan-data/"   # Diego's mirror of the file datasets
 
 METRES_PER_DEGREE = 111_320                # one degree at the equator
 ARCSEC_M = METRES_PER_DEGREE / 3600       # one arc-second at the equator, for datasets on an arc-second grid
@@ -68,16 +70,16 @@ class VarSpec:
 CATALOG: tuple[VarSpec, ...] = (
     # ---------------- Climate variables ----------------
     VarSpec("annual_precipitation", "Annual precipitation", "Climate variables", "Rainfall and temperature",
-            "mm/year", FILE, "raw/worldclim_v2_bioclim_precip/wc2.1_30s_bio_12.tif", "WorldClim 2.1, BIO12", 1000,
+            "mm/year", FILE, HF + "raw/worldclim_v2_bioclim_precip/wc2.1_30s_bio_12.tif", "WorldClim 2.1, BIO12", 1000,
             cmap="Blues", plausible=(0.0, 6000.0),
             note="1970-2000 average. CIAT's default binding for this variable points to CHELSA; this is the "
                  "WorldClim file hosted in the dataset. Confirm which one the policy should use."),
     VarSpec("mean_annual_temperature", "Mean annual temperature", "Climate variables", "Rainfall and temperature",
-            "degC", FILE, "raw/worldclim_v2_bioclim_temp/wc2.1_30s_bio_1.tif", "WorldClim 2.1, BIO1", 1000,
+            "degC", FILE, HF + "raw/worldclim_v2_bioclim_temp/wc2.1_30s_bio_1.tif", "WorldClim 2.1, BIO1", 1000,
             cmap="coolwarm", plausible=(-15.0, 35.0),
             note="1970-2000 average. CIAT's default binding points to CHELSA; this is the WorldClim file."),
     VarSpec("aridity_index", "Aridity index", "Climate variables", "Dryness",
-            "dimensionless", FILE, "raw/global_aridity_index_v3/ai_v31_yr.tif", "Global Aridity Index v3.1", 1000,
+            "dimensionless", FILE, HF + "raw/global_aridity_index_v3/ai_v31_yr.tif", "Global Aridity Index v3.1", 1000,
             scale=0.0001, cmap="RdYlBu", plausible=(0.0, 3.0),
             note="Stored as integers x 10,000; multiplied by 0.0001 here. Low values are dry, high are humid."),
     # ---------------- Soil ----------------
@@ -90,8 +92,8 @@ CATALOG: tuple[VarSpec, ...] = (
             derive="soilgrids_0_30", params={"variable": "soc"}, cmap="copper", plausible=(0.0, 600.0),
             note="Three depths, converted once (dg/kg x 0.1 to g/kg) and weighted by layer thickness."),
     VarSpec("soil_drainage", "Soil drainage class", "Soil", "Water", "class 1-7", FILE,
-            "raw/hwsd_v2/HWSD2.bil", "HWSD v2", 1000, resample="mode",
-            derive="hwsd_drainage", params={"sqlite": "raw/hwsd_v2/HWSD2.sqlite"}, cmap="YlGnBu",
+            HF + "raw/hwsd_v2/HWSD2.bil", "HWSD v2", 1000, resample="mode",
+            derive="hwsd_drainage", params={"sqlite": HF + "raw/hwsd_v2/HWSD2.sqlite"}, cmap="YlGnBu",
             kind="categorical", plausible=(1.0, 7.0), class_labels=DRAINAGE_LABELS,
             note="The raster holds soil-unit ids; the drainage class comes from the attribute database, "
                  "taking the dominant soil of each unit."),
@@ -114,7 +116,7 @@ CATALOG: tuple[VarSpec, ...] = (
             30 * ARCSEC_M, band="accessibility", cmap="magma", plausible=(0.0, 20000.0),
             note="Raw minutes. Any transformation to a 0-1 scale belongs to the function that uses it."),
     VarSpec("distance_to_road", "Distance to the nearest road", "Project risk", "Access and energy", "km",
-            FILE, "raw/osm_road_network/gis_osm_roads_free_1.shp", "OpenStreetMap roads (Geofabrik)", 100,
+            FILE, HF + "raw/osm_road_network/gis_osm_roads_free_1.shp", "OpenStreetMap roads (Geofabrik)", 100,
             derive="distance_to_lines", cmap="YlOrRd", plausible=(0.0, 500.0),
             note="Straight-line distance to the nearest road of any class, in a local metric projection. "
                  "The file covers Haiti and the Dominican Republic."),

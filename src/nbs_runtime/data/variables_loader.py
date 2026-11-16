@@ -24,7 +24,6 @@ class LoadContext:
     grid: Grid
     order: Sequence[str] = ("local", "hf")
     local_roots: Sequence[Path | str] = ()
-    hf_repo: str = hf.DEFAULT_REPO
     hf_mode: str = "stream"
     cache: LayerCache | None = None
     workers: int = 1
@@ -55,7 +54,7 @@ def _kw(ctx: LoadContext) -> dict:
 
 def _file(spec: VarSpec, ctx: LoadContext) -> VariableData:
     """A raster file, read onto the grid and converted to its unit."""
-    src, origin = hf.raster_source(spec.path, ctx.order, ctx.local_roots, ctx.hf_repo, ctx.hf_mode)
+    src, origin = hf.raster_source(spec.path, ctx.order, ctx.local_roots, ctx.hf_mode)
     resampling = "average" if spec.resample == "mean" else spec.resample
     return VariableData(spec, hf.read_raster_to_grid(src, ctx.grid, resampling, scale=spec.scale), origin)
 
@@ -100,8 +99,8 @@ def _class_shares(spec: VarSpec, ctx: LoadContext) -> VariableData:
 
 
 def _hwsd_drainage(spec: VarSpec, ctx: LoadContext) -> VariableData:
-    src, origin = hf.raster_source(spec.path, ctx.order, ctx.local_roots, ctx.hf_repo, ctx.hf_mode)
-    db, _ = hf.resolve_file(spec.params["sqlite"], ctx.order, ctx.local_roots, ctx.hf_repo)
+    src, origin = hf.raster_source(spec.path, ctx.order, ctx.local_roots, ctx.hf_mode)
+    db, _ = hf.resolve_file(spec.params["sqlite"], ctx.order, ctx.local_roots)
     smu = hf.read_raster_to_grid(src, ctx.grid, "mode")                      # whole soil-unit ids, never averaged
     lookup = hf.hwsd_drainage_lookup(db)
     values = hf.drainage_from_smu(smu, lookup)
@@ -111,7 +110,7 @@ def _hwsd_drainage(spec: VarSpec, ctx: LoadContext) -> VariableData:
 
 def _distance_to_lines(spec: VarSpec, ctx: LoadContext) -> VariableData:
     stem = spec.path.rsplit(".", 1)[0]
-    shp, origin = hf.resolve_file(spec.path, ctx.order, ctx.local_roots, ctx.hf_repo,
+    shp, origin = hf.resolve_file(spec.path, ctx.order, ctx.local_roots,
                                   siblings=[f"{stem}.{e}" for e in ("shx", "dbf", "prj", "cpg")])
     return VariableData(spec, hf.road_distance_km(shp, ctx.grid), origin)
 

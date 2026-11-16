@@ -24,7 +24,7 @@ def test_the_groups_follow_the_ones_you_asked_for():
 
 
 def test_hugging_face_paths_match_the_layout_of_the_dataset():
-    rels = {v.id: v.path for v in V.CATALOG if v.source == V.FILE}
+    rels = {v.id: v.path.removeprefix(V.HF) for v in V.CATALOG if v.source == V.FILE}
     assert rels == {
         "annual_precipitation": "raw/worldclim_v2_bioclim_precip/wc2.1_30s_bio_12.tif",
         "mean_annual_temperature": "raw/worldclim_v2_bioclim_temp/wc2.1_30s_bio_1.tif",
@@ -32,7 +32,7 @@ def test_hugging_face_paths_match_the_layout_of_the_dataset():
         "soil_drainage": "raw/hwsd_v2/HWSD2.bil",
         "distance_to_road": "raw/osm_road_network/gis_osm_roads_free_1.shp",
     }
-    assert V.BY_ID["soil_drainage"].params["sqlite"] == "raw/hwsd_v2/HWSD2.sqlite"
+    assert V.BY_ID["soil_drainage"].params["sqlite"] == V.HF + "raw/hwsd_v2/HWSD2.sqlite"
 
 
 def test_scale_factors_and_labels():

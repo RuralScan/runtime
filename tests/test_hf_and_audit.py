@@ -65,7 +65,7 @@ def test_raster_source_prefers_local_then_streams_from_the_hub(tmp_path):
     f.parent.mkdir(parents=True)
     f.write_text("x")
     assert hf.raster_source("raw/x/a.tif", ("local", "hf"), [tmp_path]) == (str(f), "local")
-    src, origin = hf.raster_source("raw/y/b.tif", ("local", "hf"), [tmp_path], mode="stream")
+    src, origin = hf.raster_source(V.HF + "raw/y/b.tif", ("local", "hf"), [tmp_path], mode="stream")
     assert origin == "hf-stream" and src == "/vsicurl/https://huggingface.co/datasets/dagudelo30/nbs-ruralscan-data/resolve/main/raw/y/b.tif"
     with pytest.raises(ValueError):
         hf.raster_source("raw/y/b.tif", mode="copy")
@@ -75,8 +75,8 @@ def test_raster_source_prefers_local_then_streams_from_the_hub(tmp_path):
 
 def test_download_path_is_used_when_asked(monkeypatch, tmp_path):
     monkeypatch.setattr(hf, "download", lambda rel, repo=hf.DEFAULT_REPO: tmp_path / "cached.tif")
-    assert hf.raster_source("raw/y/b.tif", ("hf",), mode="download") == (str(tmp_path / "cached.tif"), "hf-download")
-    path, origin = hf.resolve_file("raw/y/b.sqlite", ("hf",))
+    assert hf.raster_source(V.HF + "raw/y/b.tif", ("hf",), mode="download") == (str(tmp_path / "cached.tif"), "hf-download")
+    path, origin = hf.resolve_file(V.HF + "raw/y/b.sqlite", ("hf",))
     assert origin == "hf-download" and path == tmp_path / "cached.tif"
 
 
@@ -86,7 +86,7 @@ def test_a_missing_file_explains_where_it_looked(tmp_path, monkeypatch):
 
     monkeypatch.setattr(hf, "download", boom)
     with pytest.raises(hf.FileNotAvailable) as e:
-        hf.resolve_file("raw/z/q.shp", ("local", "hf"), [tmp_path], siblings=["raw/z/q.shx"])
+        hf.resolve_file(V.HF + "raw/z/q.shp", ("local", "hf"), [tmp_path], siblings=[V.HF + "raw/z/q.shx"])
     msg = str(e.value)
     assert "not found" in msg and "could not download raw/z/q.shp" in msg
 
@@ -472,5 +472,5 @@ def test_a_bil_needs_its_hdr_wherever_it_is_found(tmp_path, monkeypatch):
     assert hf.raster_source("raw/hwsd_v2/HWSD2.bil", ("local",), [root])[1] == "local"
     asked = []
     monkeypatch.setattr(hf, "download", lambda rel, repo=hf.DEFAULT_REPO: asked.append(rel) or tmp_path / "f")
-    _src, origin = hf.raster_source("raw/hwsd_v2/HWSD2.bil", ("hf",), mode="download")
+    _src, origin = hf.raster_source(V.HF + "raw/hwsd_v2/HWSD2.bil", ("hf",), mode="download")
     assert origin == "hf-download" and asked == ["raw/hwsd_v2/HWSD2.bil", "raw/hwsd_v2/HWSD2.hdr"]
