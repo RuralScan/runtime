@@ -19,11 +19,11 @@ from typing import Any
 GROUPS = ("Climate variables", "Soil", "Terrain and land", "Project risk")
 
 # where a variable is read from
-HF_RASTER = "hf_raster"        # a global raster in the Hugging Face dataset (or a local copy of it)
-HWSD = "hwsd"                  # HWSD v2: soil-unit raster + attribute database
-OSM_ROADS = "osm_roads"        # road lines in the Hugging Face dataset, turned into a distance
-GEE_CACHED = "gee_cached"      # Earth Engine layers shared with the index calculation (cached)
-GEE_IMAGE = "gee_image"        # a single Earth Engine image, aggregated to the grid
+GEE = "gee"      # an Earth Engine asset
+FILE = "file"    # a file in the Hugging Face dataset, or a local copy of it (DataConfig.order decides which)
+
+METRES_PER_DEGREE = 111_320                # one degree at the equator
+ARCSEC_M = METRES_PER_DEGREE / 3600       # one arc-second at the equator, for datasets on an arc-second grid
 
 LAND_COVER_LABELS = {
     10: "Tree cover", 20: "Shrubland", 30: "Grassland", 40: "Cropland", 50: "Built-up",
@@ -38,15 +38,21 @@ DRAINAGE_LABELS = {
 
 @dataclass(frozen=True)
 class VarSpec:
+    """One variable: what it is, and everything needed to load it. Swap a dataset by editing its entry."""
     id: str
     label: str
     group: str
     subgroup: str
     unit: str
-    source: str
+    source: str                        # GEE or FILE
+    path: str                          # Earth Engine asset id, or file path inside the dataset
     dataset: str                       # a name people recognise
-    native_m: int                      # native resolution of the source, metres
-    detail: Mapping[str, Any] = field(default_factory=dict)
+    native_m: float                    # native resolution of the source, metres
+    band: str | None = None
+    scale: float = 1.0                 # stored value x scale = value in `unit`
+    resample: str = "mean"             # "mean" for continuous values, "mode" for class ids
+    derive: str | None = None          # named derivation step (data/variables_loader.py); None = read as is
+    params: Mapping[str, Any] = field(default_factory=dict)    # extra inputs of the derivation step
     cmap: str = "viridis"
     kind: str = "continuous"           # or "categorical"
     plausible: tuple[float, float] | None = None
@@ -54,72 +60,74 @@ class VarSpec:
     cost: str = "fast"                 # "fast" or "slow" (reads 30 m or 10 m data in Earth Engine)
     note: str = ""
 
+    @property
+    def native_deg(self) -> float:
+        return self.native_m / METRES_PER_DEGREE
+
 
 CATALOG: tuple[VarSpec, ...] = (
     # ---------------- Climate variables ----------------
     VarSpec("annual_precipitation", "Annual precipitation", "Climate variables", "Rainfall and temperature",
-            "mm/year", HF_RASTER, "WorldClim 2.1, BIO12", 1000,
-            {"rel": "raw/worldclim_v2_bioclim_precip/wc2.1_30s_bio_12.tif", "scale": 1.0}, "Blues",
-            plausible=(0.0, 6000.0),
+            "mm/year", FILE, "raw/worldclim_v2_bioclim_precip/wc2.1_30s_bio_12.tif", "WorldClim 2.1, BIO12", 1000,
+            cmap="Blues", plausible=(0.0, 6000.0),
             note="1970-2000 average. CIAT's default binding for this variable points to CHELSA; this is the "
                  "WorldClim file hosted in the dataset. Confirm which one the policy should use."),
     VarSpec("mean_annual_temperature", "Mean annual temperature", "Climate variables", "Rainfall and temperature",
-            "degC", HF_RASTER, "WorldClim 2.1, BIO1", 1000,
-            {"rel": "raw/worldclim_v2_bioclim_temp/wc2.1_30s_bio_1.tif", "scale": 1.0}, "coolwarm",
-            plausible=(-15.0, 35.0),
+            "degC", FILE, "raw/worldclim_v2_bioclim_temp/wc2.1_30s_bio_1.tif", "WorldClim 2.1, BIO1", 1000,
+            cmap="coolwarm", plausible=(-15.0, 35.0),
             note="1970-2000 average. CIAT's default binding points to CHELSA; this is the WorldClim file."),
     VarSpec("aridity_index", "Aridity index", "Climate variables", "Dryness",
-            "dimensionless", HF_RASTER, "Global Aridity Index v3.1", 1000,
-            {"rel": "raw/global_aridity_index_v3/ai_v31_yr.tif", "scale": 0.0001}, "RdYlBu",
-            plausible=(0.0, 3.0),
+            "dimensionless", FILE, "raw/global_aridity_index_v3/ai_v31_yr.tif", "Global Aridity Index v3.1", 1000,
+            scale=0.0001, cmap="RdYlBu", plausible=(0.0, 3.0),
             note="Stored as integers x 10,000; multiplied by 0.0001 here. Low values are dry, high are humid."),
     # ---------------- Soil ----------------
-    VarSpec("soil_ph", "Soil pH, 0-30 cm", "Soil", "Fertility", "pH units", GEE_CACHED, "SoilGrids 2.0", 250,
-            {"layers": ("phh2o_0-5", "phh2o_5-15", "phh2o_15-30")}, "RdYlGn", plausible=(3.0, 10.0),
+    VarSpec("soil_ph", "Soil pH, 0-30 cm", "Soil", "Fertility", "pH units", GEE,
+            "projects/soilgrids-isric/phh2o_mean", "SoilGrids 2.0", 250, scale=0.1,
+            derive="soilgrids_0_30", params={"variable": "phh2o"}, cmap="RdYlGn", plausible=(3.0, 10.0),
             note="Three depths, converted once (pH x 10 to pH) and weighted by layer thickness."),
-    VarSpec("soil_organic_carbon", "Soil organic carbon, 0-30 cm", "Soil", "Fertility", "g/kg", GEE_CACHED,
-            "SoilGrids 2.0", 250, {"layers": ("soc_0-5", "soc_5-15", "soc_15-30")}, "copper",
-            plausible=(0.0, 600.0),
+    VarSpec("soil_organic_carbon", "Soil organic carbon, 0-30 cm", "Soil", "Fertility", "g/kg", GEE,
+            "projects/soilgrids-isric/soc_mean", "SoilGrids 2.0", 250, scale=0.1,
+            derive="soilgrids_0_30", params={"variable": "soc"}, cmap="copper", plausible=(0.0, 600.0),
             note="Three depths, converted once (dg/kg x 0.1 to g/kg) and weighted by layer thickness."),
-    VarSpec("soil_drainage", "Soil drainage class", "Soil", "Water", "class 1-7", HWSD, "HWSD v2", 1000,
-            {"rel": "raw/hwsd_v2/HWSD2.bil", "sqlite": "raw/hwsd_v2/HWSD2.sqlite"}, "YlGnBu",
+    VarSpec("soil_drainage", "Soil drainage class", "Soil", "Water", "class 1-7", FILE,
+            "raw/hwsd_v2/HWSD2.bil", "HWSD v2", 1000, resample="mode",
+            derive="hwsd_drainage", params={"sqlite": "raw/hwsd_v2/HWSD2.sqlite"}, cmap="YlGnBu",
             kind="categorical", plausible=(1.0, 7.0), class_labels=DRAINAGE_LABELS,
             note="The raster holds soil-unit ids; the drainage class comes from the attribute database, "
                  "taking the dominant soil of each unit."),
     # ---------------- Terrain and land ----------------
-    VarSpec("slope", "Slope", "Terrain and land", "Topography", "degrees", GEE_CACHED, "SRTM", 30,
-            {"layers": ("slope",)}, "terrain", plausible=(0.0, 90.0), cost="slow",
+    VarSpec("slope", "Slope", "Terrain and land", "Topography", "degrees", GEE, "USGS/SRTMGL1_003", "SRTM",
+            ARCSEC_M, band="elevation", derive="slope", cmap="terrain", plausible=(0.0, 90.0), cost="slow",
             note="Derived at the native 30 m scale and only then averaged to the grid."),
     VarSpec("land_cover", "Land cover (dominant class)", "Terrain and land", "Land cover and vegetation",
-            "class", GEE_CACHED, "ESA WorldCover 2021", 10, {"layers": ("worldcover_shares",)}, "tab20",
-            kind="categorical", class_labels=LAND_COVER_LABELS, cost="slow",
+            "class", GEE, "ESA/WorldCover/v200", "ESA WorldCover 2021", 10, band="Map", derive="class_shares",
+            cmap="tab20", kind="categorical", class_labels=LAND_COVER_LABELS, cost="slow",
             note="Shows the class with the largest share in each cell. The host gate uses the share of each "
                  "class, not the dominant one."),
     VarSpec("tree_canopy_cover", "Tree canopy cover", "Terrain and land", "Land cover and vegetation",
-            "percent", GEE_IMAGE, "Hansen Global Forest Change (treecover2000)", 30,
-            {"asset": "UMD/hansen/global_forest_change_2023_v1_11", "band": "treecover2000"}, "Greens",
-            plausible=(0.0, 100.0), cost="slow",
+            "percent", GEE, "UMD/hansen/global_forest_change_2023_v1_11", "Hansen Global Forest Change (treecover2000)",
+            ARCSEC_M, band="treecover2000", cmap="Greens", plausible=(0.0, 100.0), cost="slow",
             note="Canopy cover in the year 2000. Newer versions of the asset exist; this is the one in CIAT's registry."),
     # ---------------- Project risk ----------------
     VarSpec("accessibility_travel_time", "Travel time to the nearest city", "Project risk", "Access and energy",
-            "minutes", GEE_IMAGE, "Oxford MAP accessibility 2015", 1000,
-            {"asset": "Oxford/MAP/accessibility_to_cities_2015_v1_0", "band": "accessibility"}, "magma",
-            plausible=(0.0, 20000.0),
+            "minutes", GEE, "Oxford/MAP/accessibility_to_cities_2015_v1_0", "Oxford MAP accessibility 2015",
+            30 * ARCSEC_M, band="accessibility", cmap="magma", plausible=(0.0, 20000.0),
             note="Raw minutes. Any transformation to a 0-1 scale belongs to the function that uses it."),
     VarSpec("distance_to_road", "Distance to the nearest road", "Project risk", "Access and energy", "km",
-            OSM_ROADS, "OpenStreetMap roads (Geofabrik)", 100,
-            {"rel": "raw/osm_road_network/gis_osm_roads_free_1.shp"}, "YlOrRd", plausible=(0.0, 500.0),
+            FILE, "raw/osm_road_network/gis_osm_roads_free_1.shp", "OpenStreetMap roads (Geofabrik)", 100,
+            derive="distance_to_lines", cmap="YlOrRd", plausible=(0.0, 500.0),
             note="Straight-line distance to the nearest road of any class, in a local metric projection. "
                  "The file covers Haiti and the Dominican Republic."),
     VarSpec("electrification_index", "Night-time light (electrification proxy)", "Project risk", "Access and energy",
-            "nW/cm2/sr", GEE_IMAGE, "VIIRS annual night-time lights", 500,
-            {"asset": "NOAA/VIIRS/DNB/ANNUAL_V21", "band": "average", "year": None}, "inferno",
+            "nW/cm2/sr", GEE, "NOAA/VIIRS/DNB/ANNUAL_V21", "VIIRS annual night-time lights", 15 * ARCSEC_M,
+            band="average", derive="annual_composite", params={"year": None}, cmap="inferno",
             plausible=(0.0, 500.0),
             note="Most rural land is near 0 and cities stand out. By default it uses the latest year the asset has; "
                  "set VIIRS_YEAR to choose another."),
     VarSpec("protected_area_status", "Share of the cell inside a protected area", "Project risk",
-            "Legal and protection", "share 0-1", GEE_IMAGE, "WDPA (World Database on Protected Areas)", 30,
-            {"asset": "WCMC/WDPA/current/polygons"}, "Purples", plausible=(0.0, 1.0), cost="slow",
+            "Legal and protection", "share 0-1", GEE, "WCMC/WDPA/current/polygons",
+            "WDPA (World Database on Protected Areas)", 30, derive="polygon_share", cmap="Purples",
+            plausible=(0.0, 1.0), cost="slow",
             note="Context only. CIAT states that a protected-area category alone does not establish a legal "
                  "exclusion: that needs an assessed rule."),
 )

@@ -12,8 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .aoi import AOI
-
-METRES_PER_DEGREE = 111_320
+from .variables import METRES_PER_DEGREE
 
 
 @dataclass(frozen=True)

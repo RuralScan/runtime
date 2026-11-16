@@ -248,10 +248,12 @@ def fake_ee(monkeypatch):
         return out
 
     monkeypatch.setattr(gee, "load_worldcover_shares", shares)
-    monkeypatch.setattr(gee, "load_tree_canopy", lambda g, a, b, **k: calls.append("canopy") or np.full(shape_of(g), 35.0))
-    monkeypatch.setattr(gee, "load_accessibility", lambda g, a, b, **k: calls.append("access") or np.full(shape_of(g), 90.0))
-    monkeypatch.setattr(gee, "load_viirs", lambda g, a, b, y, **k: calls.append(f"viirs{y}") or np.full(shape_of(g), 0.4))
-    monkeypatch.setattr(gee, "load_wdpa_share", lambda g, a, **k: calls.append("wdpa") or np.full(shape_of(g), 0.1))
+
+    def image(spec, g, **k):                  # every single-image variable goes through one loader
+        calls.append(f"viirs{spec.params['year']}" if spec.derive == "annual_composite" else spec.id)
+        return np.full(shape_of(g), 0.5)
+
+    monkeypatch.setattr(gee, "load_gee_image", image)
     return calls
 
 
@@ -362,7 +364,9 @@ def test_an_earth_engine_error_is_reported_for_that_variable_and_does_not_stop_t
     def boom(*a, **k):
         raise EEException("Image.bandNames: Parameter 'image' is required and may not be null.")
 
-    monkeypatch.setattr(gee, "load_viirs", boom)
+    fake = gee.load_gee_image
+    monkeypatch.setattr(gee, "load_gee_image",
+                        lambda spec, g, **k: boom() if spec.derive == "annual_composite" else fake(spec, g, **k))
     ctx = LoadContext(GRID, cache=LayerCache(tmp_path, GRID, gee.ASSET_IDS), verbose=False)
     bad = load_variable(V.BY_ID["electrification_index"], ctx)
     assert not bad.ok and bad.error.startswith("EEException: ") and "may not be null" in bad.error

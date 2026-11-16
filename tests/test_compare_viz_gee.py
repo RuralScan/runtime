@@ -1,9 +1,11 @@
 import itertools
+from dataclasses import replace
 
 import pytest
 
 np = pytest.importorskip("numpy")
 
+from nbs_runtime import variables as V
 from nbs_runtime.compare import compare, rankdata, spearman
 from nbs_runtime.data import gee
 from nbs_runtime.data.synthetic import synthetic_layers
@@ -67,16 +69,16 @@ def test_plot_runs_and_writes_a_file(run, tmp_path):
 
 def test_aggregation_stages_respect_earth_engines_limit():
     target = 5000 / 111_320
-    stages = gee.aggregation_stages(gee.SRTM_NATIVE_DEG, target)
+    stages = gee.aggregation_stages(gee.SLOPE.native_deg, target)
     assert len(stages) == 2 and stages[-1] == target
-    prev = gee.SRTM_NATIVE_DEG
+    prev = gee.SLOPE.native_deg
     for s in stages:
         assert 1 < s / prev <= 32.0 + 1e-9
         prev = s
-    assert gee.aggregation_stages(gee.SRTM_NATIVE_DEG, gee.SRTM_NATIVE_DEG) == []
-    wc = gee.aggregation_stages(gee.WORLDCOVER_NATIVE_DEG, target)                  # 10 m to 5 km
+    assert gee.aggregation_stages(gee.SLOPE.native_deg, gee.SLOPE.native_deg) == []
+    wc = gee.aggregation_stages(gee.LAND_COVER.native_deg, target)                  # 10 m to 5 km
     assert len(wc) == 2 and wc[-1] == target
-    assert wc[0] / gee.WORLDCOVER_NATIVE_DEG <= 32.0 and wc[1] / wc[0] <= 32.0
+    assert wc[0] / gee.LAND_COVER.native_deg <= 32.0 and wc[1] / wc[0] <= 32.0
 
 
 def test_soilgrids_band_names():
@@ -103,7 +105,7 @@ def test_grid_windows_stay_aligned_with_the_global_grid():
     assert GRID.window(0, GRID.height, 0, GRID.width).crs_transform == pytest.approx(GRID.crs_transform)
 
 
-@pytest.mark.parametrize("native", [gee.SRTM_NATIVE_DEG, gee.SOILGRIDS_NATIVE_DEG, gee.WORLDCOVER_NATIVE_DEG])
+@pytest.mark.parametrize("native", [gee.SLOPE.native_deg, gee.SOILGRIDS["soc"].native_deg, gee.LAND_COVER.native_deg])
 def test_tiles_cover_the_grid_exactly_once_and_respect_the_pixel_budget(native):
     tiles = gee.tile_plan(GRID, native)
     cover = np.zeros(GRID.shape, dtype=int)
@@ -117,9 +119,9 @@ def test_tiles_cover_the_grid_exactly_once_and_respect_the_pixel_budget(native):
 
 
 def test_heavier_inputs_get_smaller_tiles():
-    slope = gee.tile_plan(GRID, gee.SRTM_NATIVE_DEG)
-    host = gee.tile_plan(GRID, gee.WORLDCOVER_NATIVE_DEG)
-    soil = gee.tile_plan(GRID, gee.SOILGRIDS_NATIVE_DEG)
+    slope = gee.tile_plan(GRID, gee.SLOPE.native_deg)
+    host = gee.tile_plan(GRID, gee.LAND_COVER.native_deg)
+    soil = gee.tile_plan(GRID, gee.SOILGRIDS["soc"].native_deg)
     assert len(host) > len(slope) > len(soil)
 
 
@@ -142,7 +144,7 @@ def test_stitching_tiles_gives_the_same_array_as_one_request(monkeypatch):
     monkeypatch.setattr(gee, "_open", lambda image, sub: {"v": field(sub)})
     whole = field(GRID)
     for budget in (10_000_000, 400_000, 1):                 # one tile, several tiles, single cells
-        got = gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "test", verbose=False, max_input_pixels=budget)["v"]
+        got = gee._fetch(None, GRID, gee.SLOPE.native_deg, "test", verbose=False, max_input_pixels=budget)["v"]
         assert got.shape == GRID.shape
         assert np.allclose(got, whole)
 
@@ -164,8 +166,8 @@ def _field(grid):
 
 def test_parallel_fetch_gives_the_same_array_as_sequential(monkeypatch):
     monkeypatch.setattr(gee, "_open", lambda image, sub: {"v": _field(sub)})
-    seq = gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "t", verbose=False, workers=1)["v"]
-    par = gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "t", verbose=False, workers=4)["v"]
+    seq = gee._fetch(None, GRID, gee.SLOPE.native_deg, "t", verbose=False, workers=1)["v"]
+    par = gee._fetch(None, GRID, gee.SLOPE.native_deg, "t", verbose=False, workers=4)["v"]
     assert np.array_equal(seq, par) and np.allclose(par, _field(GRID))
 
 
@@ -180,12 +182,12 @@ def test_a_failing_tile_is_raised_in_parallel_mode_too(monkeypatch):
 
     monkeypatch.setattr(gee, "_open", flaky)
     with pytest.raises(RuntimeError, match="memory"):
-        gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "t", verbose=False, workers=4)
+        gee._fetch(None, GRID, gee.SLOPE.native_deg, "t", verbose=False, workers=4)
 
 
 def test_progress_reports_time_left(monkeypatch, capsys):
     monkeypatch.setattr(gee, "_open", lambda image, sub: {"v": _field(sub)})
-    gee._fetch(None, GRID, gee.SRTM_NATIVE_DEG, "slope", verbose=True, workers=2)
+    gee._fetch(None, GRID, gee.SLOPE.native_deg, "slope", verbose=True, workers=2)
     out = capsys.readouterr().out
     assert "tiles" in out and "left" in out and "done in" in out
 
@@ -294,17 +296,21 @@ def _fake_ee(monkeypatch, years, bands=("average",)):
     return seen, EEException
 
 
+def _lights(year=None):
+    return replace(V.BY_ID["electrification_index"], params={"year": year})
+
+
 def test_night_lights_use_the_latest_year_the_asset_has_by_default(monkeypatch):
     seen, _ = _fake_ee(monkeypatch, range(2012, 2022))
     assert gee.collection_years("x") == list(range(2012, 2022))
-    out = gee.load_viirs(GRID, "x", "average")
+    out = gee.load_gee_image(_lights(), GRID)
     assert out.shape == GRID.shape and seen["window"] == ("2021-01-01", "2022-01-01")
 
 
 def test_a_year_the_asset_does_not_have_is_explained(monkeypatch):
     _fake_ee(monkeypatch, range(2012, 2022))
     with pytest.raises(ValueError) as e:
-        gee.load_viirs(GRID, "NOAA/VIIRS/DNB/ANNUAL_V21", "average", 2023)
+        gee.load_gee_image(_lights(year=2023), GRID)
     msg = str(e.value)
     assert "no composite for 2023" in msg and "2012 to 2021" in msg and "VIIRS_YEAR" in msg
 
@@ -312,7 +318,7 @@ def test_a_year_the_asset_does_not_have_is_explained(monkeypatch):
 def test_an_empty_collection_and_an_unreadable_image_say_what_happened(monkeypatch):
     _fake_ee(monkeypatch, [])
     with pytest.raises(ValueError, match="has no images"):
-        gee.load_viirs(GRID, "x", "average")
+        gee.load_gee_image(_lights(), GRID)
 
     import sys
 
