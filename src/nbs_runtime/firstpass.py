@@ -53,7 +53,7 @@ class Layers:
 @dataclass
 class FirstPass:
     status: np.ndarray                      # uint8, codes in STATUS
-    pete: np.ndarray                        # CIAT index, NaN unless scored
+    baseline_index: np.ndarray              # CIAT partial terrain-and-soil index, NaN unless scored
     combo_id: np.ndarray                    # class-combination id, -1 unless scored
     eligible_fraction: np.ndarray
     mode: str
@@ -115,7 +115,7 @@ def run_first_pass(space: LevelSpace, layers: Layers, mode: str = "exploratory")
     if scored.any():
         flat = np.ravel_multi_index(tuple(i[scored] for i in idx), tuple(len(lv) for lv in space.levels))
         combo[scored] = flat
-    pete = np.where(scored, index, np.nan)
+    baseline_index = np.where(scored, index, np.nan)
 
     depth_index = depth_range = None
     if layers.soc_by_depth and layers.ph_by_depth:
@@ -128,7 +128,7 @@ def run_first_pass(space: LevelSpace, layers: Layers, mode: str = "exploratory")
             warnings.simplefilter("ignore", RuntimeWarning)
             depth_range = np.where(np.isnan(stack).any(axis=0), np.nan,
                                    np.nanmax(stack, axis=0) - np.nanmin(stack, axis=0))
-    return FirstPass(status, pete, combo, fe, mode, depth_index, depth_range)
+    return FirstPass(status, baseline_index, combo, fe, mode, depth_index, depth_range)
 
 
 REASONS = {
