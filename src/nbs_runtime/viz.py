@@ -200,7 +200,13 @@ def _category_colors(n: int, cmap: str):
     return [base(i / max(n - 1, 1)) for i in range(n)]  # a continuous map: spread the classes along it
 
 
-def plot_variable_audit(audit, grid: Grid, out_path: Path | None = None):
+def draw_boundary(ax, units) -> None:
+    """Outline every admin unit of a GeoDataFrame on a map axis, keeping the axis limits."""
+    ax.autoscale(False)
+    units.boundary.plot(ax=ax, color="#222222", lw=0.8, add_labels=False)
+
+
+def plot_variable_audit(audit, grid: Grid, out_path: Path | None = None, boundary=None):
     """A map of one variable and its distribution (a histogram, or the share of each class)."""
     import matplotlib.colors as mcolors
     import matplotlib.patches as mpatches
@@ -246,6 +252,8 @@ def plot_variable_audit(audit, grid: Grid, out_path: Path | None = None):
             for edge in s.plausible:
                 if known.min() <= edge <= known.max():
                     ax2.axvline(edge, color="#D9822B", ls="--", lw=1)
+    if boundary is not None:
+        draw_boundary(ax1, boundary)
     ax1.set_xlabel("longitude")
     ax1.set_ylabel("latitude")
     fig.text(0.02, 0.905, sub, fontsize=9, color="#555555")
@@ -255,7 +263,7 @@ def plot_variable_audit(audit, grid: Grid, out_path: Path | None = None):
     return fig
 
 
-def plot_group_overview(audits, grid: Grid, title: str, out_path: Path | None = None):
+def plot_group_overview(audits, grid: Grid, title: str, out_path: Path | None = None, boundary=None):
     """Small maps of every variable of a group side by side."""
     import matplotlib.colors as mcolors
     import matplotlib.pyplot as plt
@@ -288,6 +296,8 @@ def plot_group_overview(audits, grid: Grid, title: str, out_path: Path | None = 
             cm = plt.get_cmap(s.cmap).with_extremes(bad="#d9d9d9")
             im = ax.imshow(np.ma.masked_invalid(a.values), cmap=cm, extent=grid.extent, origin="upper")
             plt.colorbar(im, ax=ax, fraction=0.046)
+        if boundary is not None:
+            draw_boundary(ax, boundary)
         ax.tick_params(labelsize=8)
     prefix = "SYNTHETIC TEST: " if any(a.synthetic for a in audits) else ""
     fig.suptitle(prefix + title, fontsize=14, fontweight="bold")
