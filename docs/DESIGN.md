@@ -26,9 +26,9 @@ historical packages. Read them on GitHub at the pinned commit when a number need
 A package version is immutable. A new version is a new folder (`developer-v0.1.6`), never an edit.
 
 1. Find the new version in `handoff/agroforestry-t4/` on CIAT main and note the commit.
-2. `python scripts/sync_upstream.py --ref <commit> --package agroforestry-t4/developer-vX.Y.Z`
+2. `uv run python scripts/sync_upstream.py --ref <commit> --package agroforestry-t4/developer-vX.Y.Z`
    (refuses to pin if a file disagrees with CIAT's own manifest hashes).
-3. `pytest`. Failing conformance cases or a fingerprint hold mean CIAT changed a function:
+3. `uv run pytest`. Failing conformance cases or a fingerprint hold mean CIAT changed a function:
    read the package README and decide; do not patch values locally.
 4. Commit `upstream/` with the new pin in one pull request.
 5. Re-run the notebook. Every run records the pin, so results from different package

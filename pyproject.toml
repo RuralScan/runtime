@@ -15,8 +15,12 @@ geo = ["numpy", "rasterio", "geopandas", "shapely", "pyproj", "pyarrow"]
 gee = ["earthengine-api", "xee", "xarray"]
 hf  = ["huggingface_hub"]
 viz = ["matplotlib"]
+
 audit = ["rasterio", "geopandas", "shapely", "pyproj", "pyarrow", "huggingface_hub", "matplotlib", "earthengine-api", "xee", "xarray"]
-dev = ["pytest", "ruff", "numpy"]
+
+[dependency-groups]
+dev = ["pytest", "ruff", "ty", "numpy", "ipykernel"]
+
 
 [tool.setuptools.packages.find]
 where = ["src"]
