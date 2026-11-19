@@ -42,7 +42,7 @@ def test_comparison_only_fills_scored_pixels(run):
 
 def test_the_simulation_tracks_ciat_ranks_closely_but_not_exactly(run):
     stats = run[2].stats
-    assert 0.8 < stats["spearman_pete_vs_median"] <= 1.0
+    assert 0.8 < stats["spearman_baseline_vs_median"] <= 1.0
     assert 0.5 < stats["top_third_agreement"] <= 1.0
     assert stats["n_scored"] == int(run[0].scored.sum())
 

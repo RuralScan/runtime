@@ -1,4 +1,4 @@
-"""Array versions of CIAT's rules, plus the input conversions Pete's brief spells out.
+"""Array versions of CIAT's rules, plus the input conversions the first pass needs.
 
 Everything here is plain numpy and offline. Unknown is NaN (or -1 for class indices) and is
 never converted to zero or filled with a mean.
@@ -59,7 +59,7 @@ def level_index(levels: Sequence[float], scores: np.ndarray) -> np.ndarray:
 
 def thickness_weighted(layers: Sequence[np.ndarray],
                        thickness: Sequence[float] = TOPSOIL_THICKNESS_CM) -> np.ndarray:
-    """Pete's 0-30 cm proposal: (5*x0_5 + 10*x5_15 + 15*x15_30) / 30, already converted layers.
+    """Proposed 0-30 cm thickness-weighted value: (5*x0_5 + 10*x5_15 + 15*x15_30) / 30, already converted layers.
 
     A cell missing any layer is unknown: no renormalisation onto the remaining depths.
     """

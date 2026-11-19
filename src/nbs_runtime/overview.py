@@ -43,7 +43,7 @@ class Overview:
     resolution_m: int
     extent: tuple[float, float, float, float]
     min_scored_share: float
-    ciat: np.ndarray
+    baseline_index: np.ndarray
     median: np.ndarray
     p05: np.ndarray
     p95: np.ndarray
@@ -56,7 +56,7 @@ class Overview:
 
     @property
     def shape(self) -> tuple[int, int]:
-        return self.ciat.shape
+        return self.baseline_index.shape
 
 
 def make_overview(fp: FirstPass, comp: Comparison, grid: Grid, overview_m: int,
@@ -80,7 +80,7 @@ def make_overview(fp: FirstPass, comp: Comparison, grid: Grid, overview_m: int,
         factor=factor, resolution_m=overview_m,
         extent=(minx, minx + nw * r, maxy - nh * r, maxy),
         min_scored_share=min_scored_share,
-        ciat=mean_of(fp.pete), median=mean_of(comp.median), p05=mean_of(comp.p05),
+        baseline_index=mean_of(fp.baseline_index), median=mean_of(comp.median), p05=mean_of(comp.p05),
         p95=mean_of(comp.p95), p_top=mean_of(comp.p_top),
         coverage=coverage,
     )
