@@ -12,8 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .aoi import AOI
-
-METRES_PER_DEGREE = 111_320
+from .variables import METRES_PER_DEGREE
 
 
 @dataclass(frozen=True)
@@ -80,6 +79,13 @@ class Grid:
         lon = minx + (np.arange(self.width) + 0.5) * r
         lat = maxy - (np.arange(self.height) + 0.5) * r
         return lon, lat
+
+    def mask(self, units) -> np.ndarray:
+        """True for cells whose centre is inside any polygon of a GeoDataFrame in EPSG:4326."""
+        from rasterio.features import geometry_mask
+        from rasterio.transform import Affine
+
+        return geometry_mask(units.geometry, out_shape=self.shape, transform=Affine(*self.crs_transform), invert=True)
 
     def cell_area_km2(self) -> np.ndarray:
         """Approximate area of each row of cells in km2 (shrinks with latitude), shape (height,)."""

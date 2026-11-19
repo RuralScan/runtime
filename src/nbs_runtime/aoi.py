@@ -1,8 +1,8 @@
 """Area of interest (AOI): what a run covers, and where that boundary comes from.
 
-Only the bounding box is resolved here. An official boundary (for example GADM through the T7
-registry) is fetched later by the data adapter; until its source is recorded the plan reports a
-hold, because CIAT's package asks that the target area and its source be recorded.
+An admin AOI resolves to its World Bank Admin 0, 1 or 2 polygon (see data/boundaries.py). Until the
+boundary's source is recorded the plan reports a hold, because CIAT's package asks that the
+target area and its source be recorded.
 """
 from __future__ import annotations
 
@@ -56,7 +56,8 @@ class AOI:
     bbox: tuple[float, float, float, float] | None = None
     source: str = ""            # where the boundary comes from (empty = not recorded)
     geojson_path: str = ""      # kind = "geojson"
-    admin_code: str = ""        # kind = "admin" (for example an ISO3 or GADM code)
+    admin_code: str = ""        # kind = "admin": World Bank code, e.g. HTI, HTI002, HTI002001
+    admin_level: int = 0        # kind = "admin": 0 country, 1 region, 2 district
     notes: tuple[str, ...] = field(default=(), compare=False)
 
     def resolved_bbox(self, base_dir: Path | None = None) -> tuple[float, float, float, float] | None:
@@ -67,7 +68,15 @@ class AOI:
             if base_dir and not p.is_absolute():
                 p = base_dir / p
             return bbox_of_geojson(p) if p.exists() else None
+        if self.kind == "admin" and self.admin_code:
+            return tuple(self.boundary().total_bounds)
         return None
+
+    def boundary(self):
+        """The official admin units of an admin AOI, as a GeoDataFrame (see data/boundaries.py)."""
+        from .data.boundaries import admin
+
+        return admin(self.admin_code, self.admin_level)
 
     def validate(self) -> list[str]:
         """Return a list of problems; empty means the AOI is well formed."""
@@ -86,6 +95,8 @@ class AOI:
             problems.append("aoi.geojson_path is required when kind = 'geojson'")
         elif self.kind == "admin" and not self.admin_code:
             problems.append("aoi.admin_code is required when kind = 'admin'")
+        elif self.kind == "admin" and self.admin_level not in (0, 1, 2):
+            problems.append("aoi.admin_level must be 0, 1 or 2")
         return problems
 
     def area_km2(self, base_dir: Path | None = None) -> float | None:

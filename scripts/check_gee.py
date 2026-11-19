@@ -39,7 +39,7 @@ def main() -> None:
     gee.init_ee(a.project)
     grid = Grid.from_bbox(tuple(a.bbox), a.resolution)
     print("grid:", grid.shape, "rows x columns at", a.resolution, "m")
-    print("aggregation stages for slope (deg):", [round(s, 5) for s in gee.aggregation_stages(gee.SRTM_NATIVE_DEG, grid.resolution_deg)])
+    print("aggregation stages for slope (deg):", [round(s, 5) for s in gee.aggregation_stages(gee.SLOPE.native_deg, grid.resolution_deg)])
 
     pkg = load_package()
     gate = pkg.gate_params(pkg.policy("planted_terrain_soil_v1"))

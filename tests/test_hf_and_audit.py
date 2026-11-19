@@ -55,23 +55,28 @@ def test_local_copy_is_found_with_or_without_the_raw_folder(tmp_path):
     assert hf.find_local("raw/none.tif", [tmp_path]) is None
 
 
+def test_raster_source_opens_full_urls_as_is(tmp_path):
+    for url in ("s3://bucket/a.tif", "https://example.org/b.tif"):
+        assert hf.raster_source(url, ("local", "hf"), [tmp_path]) == (url, "remote")
+
+
 def test_raster_source_prefers_local_then_streams_from_the_hub(tmp_path):
     f = tmp_path / "raw" / "x" / "a.tif"
     f.parent.mkdir(parents=True)
     f.write_text("x")
     assert hf.raster_source("raw/x/a.tif", ("local", "hf"), [tmp_path]) == (str(f), "local")
-    src, origin = hf.raster_source("raw/y/b.tif", ("local", "hf"), [tmp_path], mode="stream")
+    src, origin = hf.raster_source(V.HF + "raw/y/b.tif", ("local", "hf"), [tmp_path], mode="stream")
     assert origin == "hf-stream" and src == "/vsicurl/https://huggingface.co/datasets/dagudelo30/nbs-ruralscan-data/resolve/main/raw/y/b.tif"
     with pytest.raises(ValueError):
         hf.raster_source("raw/y/b.tif", mode="copy")
-    with pytest.raises(hf.FileNotAvailable, match="not found locally"):
+    with pytest.raises(hf.FileNotAvailable, match="not found"):
         hf.raster_source("raw/y/b.tif", ("local",), [tmp_path])
 
 
 def test_download_path_is_used_when_asked(monkeypatch, tmp_path):
     monkeypatch.setattr(hf, "download", lambda rel, repo=hf.DEFAULT_REPO: tmp_path / "cached.tif")
-    assert hf.raster_source("raw/y/b.tif", ("hf",), mode="download") == (str(tmp_path / "cached.tif"), "hf-download")
-    path, origin = hf.resolve_file("raw/y/b.sqlite", ("hf",))
+    assert hf.raster_source(V.HF + "raw/y/b.tif", ("hf",), mode="download") == (str(tmp_path / "cached.tif"), "hf-download")
+    path, origin = hf.resolve_file(V.HF + "raw/y/b.sqlite", ("hf",))
     assert origin == "hf-download" and path == tmp_path / "cached.tif"
 
 
@@ -81,7 +86,7 @@ def test_a_missing_file_explains_where_it_looked(tmp_path, monkeypatch):
 
     monkeypatch.setattr(hf, "download", boom)
     with pytest.raises(hf.FileNotAvailable) as e:
-        hf.resolve_file("raw/z/q.shp", ("local", "hf"), [tmp_path], siblings=["raw/z/q.shx"])
+        hf.resolve_file(V.HF + "raw/z/q.shp", ("local", "hf"), [tmp_path], siblings=[V.HF + "raw/z/q.shx"])
     msg = str(e.value)
     assert "not found" in msg and "could not download raw/z/q.shp" in msg
 
@@ -126,8 +131,8 @@ def test_class_codes_are_never_averaged(tmp_path):
     path = write_tif(tmp_path / "c.tif", arr)
     out = hf.read_raster_to_grid(str(path), GRID, "mode")
     assert set(np.unique(out[np.isfinite(out)])) <= {10.0, 40.0, 80.0}
-    with pytest.raises(ValueError):
-        hf.read_raster_to_grid(str(path), GRID, "cubic")
+    with pytest.raises(KeyError):
+        hf.read_raster_to_grid(str(path), GRID, "avg")
 
 
 # ---------------------------------------------------------------- HWSD v2
@@ -248,10 +253,12 @@ def fake_ee(monkeypatch):
         return out
 
     monkeypatch.setattr(gee, "load_worldcover_shares", shares)
-    monkeypatch.setattr(gee, "load_tree_canopy", lambda g, a, b, **k: calls.append("canopy") or np.full(shape_of(g), 35.0))
-    monkeypatch.setattr(gee, "load_accessibility", lambda g, a, b, **k: calls.append("access") or np.full(shape_of(g), 90.0))
-    monkeypatch.setattr(gee, "load_viirs", lambda g, a, b, y, **k: calls.append(f"viirs{y}") or np.full(shape_of(g), 0.4))
-    monkeypatch.setattr(gee, "load_wdpa_share", lambda g, a, **k: calls.append("wdpa") or np.full(shape_of(g), 0.1))
+
+    def image(spec, g, **k):                  # every single-image variable goes through one loader
+        calls.append(f"viirs{spec.params['year']}" if spec.derive == "annual_composite" else spec.id)
+        return np.full(shape_of(g), 0.5)
+
+    monkeypatch.setattr(gee, "load_gee_image", image)
     return calls
 
 
@@ -362,7 +369,9 @@ def test_an_earth_engine_error_is_reported_for_that_variable_and_does_not_stop_t
     def boom(*a, **k):
         raise EEException("Image.bandNames: Parameter 'image' is required and may not be null.")
 
-    monkeypatch.setattr(gee, "load_viirs", boom)
+    fake = gee.load_gee_image
+    monkeypatch.setattr(gee, "load_gee_image",
+                        lambda spec, g, **k: boom() if spec.derive == "annual_composite" else fake(spec, g, **k))
     ctx = LoadContext(GRID, cache=LayerCache(tmp_path, GRID, gee.ASSET_IDS), verbose=False)
     bad = load_variable(V.BY_ID["electrification_index"], ctx)
     assert not bad.ok and bad.error.startswith("EEException: ") and "may not be null" in bad.error
@@ -463,5 +472,13 @@ def test_a_bil_needs_its_hdr_wherever_it_is_found(tmp_path, monkeypatch):
     assert hf.raster_source("raw/hwsd_v2/HWSD2.bil", ("local",), [root])[1] == "local"
     asked = []
     monkeypatch.setattr(hf, "download", lambda rel, repo=hf.DEFAULT_REPO: asked.append(rel) or tmp_path / "f")
-    _src, origin = hf.raster_source("raw/hwsd_v2/HWSD2.bil", ("hf",), mode="download")
+    _src, origin = hf.raster_source(V.HF + "raw/hwsd_v2/HWSD2.bil", ("hf",), mode="download")
     assert origin == "hf-download" and asked == ["raw/hwsd_v2/HWSD2.bil", "raw/hwsd_v2/HWSD2.hdr"]
+
+
+def test_every_derive_step_in_the_registry_exists():
+    from nbs_runtime.data import variables_loader as vl
+
+    for v in V.CATALOG:
+        known = vl._STEPS.keys() | (gee.IMAGE_STEPS.keys() if v.source == V.GEE else {None})
+        assert v.derive in known, f"{v.id}: unknown derive step {v.derive!r}"
