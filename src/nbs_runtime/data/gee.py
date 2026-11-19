@@ -35,23 +35,21 @@ from pathlib import Path
 import numpy as np
 
 from ..firstpass import Layers
-from ..grid import METRES_PER_DEGREE, Grid
+from ..grid import Grid
 from ..rasters import TOPSOIL_LAYERS, WORLDCOVER_CODES
+from ..variables import BY_ID, VarSpec
 from .assemble import assemble_layers
 from .cache import LayerCache
 
-SRTM = "USGS/SRTMGL1_003"
-SOILGRIDS_PREFIX = "projects/soilgrids-isric"
-WORLDCOVER = "ESA/WorldCover/v200"
-SRTM_NATIVE_DEG = 1.0 / 3600.0                      # 1 arc-second
-SOILGRIDS_NATIVE_DEG = 250.0 / METRES_PER_DEGREE
-WORLDCOVER_NATIVE_DEG = 10.0 / METRES_PER_DEGREE
+# The first-pass layers. Their datasets are set in the variable registry (variables.py), not here.
+SLOPE = BY_ID["slope"]
+LAND_COVER = BY_ID["land_cover"]
+SOILGRIDS = {v.params["variable"]: v for v in (BY_ID["soil_organic_carbon"], BY_ID["soil_ph"])}
 # what is recorded in the cache key: change any of these and a new cache folder is used
 ASSET_IDS = {
-    "slope": f"{SRTM} elevation, ee.Terrain.slope at native scale, mean to grid",
-    "soc": f"{SOILGRIDS_PREFIX}/soc_mean depths 0-5, 5-15, 15-30 cm, as stored",
-    "phh2o": f"{SOILGRIDS_PREFIX}/phh2o_mean depths 0-5, 5-15, 15-30 cm, as stored",
-    "host": f"{WORLDCOVER} Map, share of each class, mean to grid",
+    "slope": f"{SLOPE.path} {SLOPE.band}, ee.Terrain.slope at native scale, mean to grid",
+    **{var: f"{v.path} depths 0-5, 5-15, 15-30 cm, as stored" for var, v in SOILGRIDS.items()},
+    "host": f"{LAND_COVER.path} {LAND_COVER.band}, share of each class, mean to grid",
 }
 MAX_PIXELS_PER_OUTPUT = 1024                         # Earth Engine's limit for reduceResolution
 MAX_TILE_INPUT_PIXELS = 2_500_000                    # fine pixels one tile may read
@@ -222,22 +220,17 @@ def _fetch(image, grid: Grid, native_deg: float, label: str, verbose: bool = Tru
 
 def request_plan(grid: Grid, host: str = "apply", max_input_pixels: int = MAX_TILE_INPUT_PIXELS) -> dict[str, int]:
     """How many Earth Engine requests an extraction will make, per layer, before it starts."""
-    n = lambda native: len(tile_plan(grid, native, max_input_pixels))
-    plan = {"slope": n(SRTM_NATIVE_DEG), "soil (6 bands)": 6 * n(SOILGRIDS_NATIVE_DEG)}
+    n = lambda spec: len(tile_plan(grid, spec.native_deg, max_input_pixels))
+    plan = {"slope": n(SLOPE), "soil (6 bands)": 6 * n(SOILGRIDS["soc"])}
     if host == "apply":
-        plan["land cover (11 classes)"] = n(WORLDCOVER_NATIVE_DEG)
+        plan["land cover (11 classes)"] = n(LAND_COVER)
     plan["total"] = sum(plan.values())
     return plan
 
 
 def load_slope(grid: Grid, verbose: bool = True, max_input_pixels: int = MAX_TILE_INPUT_PIXELS,
                workers: int = 1) -> np.ndarray:
-    import ee
-
-    elevation = ee.Image(SRTM).select("elevation")
-    slope = ee.Terrain.slope(elevation).rename("slope")                 # degrees, native scale
-    img = _aggregate(slope, grid, SRTM_NATIVE_DEG)
-    return _fetch(img, grid, SRTM_NATIVE_DEG, "slope", verbose, max_input_pixels, workers)["slope"]
+    return load_gee_image(SLOPE, grid, verbose=verbose, max_input_pixels=max_input_pixels, workers=workers)
 
 
 def load_soilgrids_band(grid: Grid, variable: str, depth: str, verbose: bool = True,
@@ -245,13 +238,12 @@ def load_soilgrids_band(grid: Grid, variable: str, depth: str, verbose: bool = T
     """One SoilGrids mean prediction at one depth, in the stored units (not yet converted)."""
     import ee
 
-    image = ee.Image(f"{SOILGRIDS_PREFIX}/{variable}_mean")
-    available = image.bandNames().getInfo()
+    spec = SOILGRIDS[variable]
+    image = ee.Image(spec.path)
     band = soilgrids_band(variable, depth)
-    if band not in available:
-        raise ValueError(f"band {band!r} not in {SOILGRIDS_PREFIX}/{variable}_mean; bands: {available}")
-    img = _aggregate(image.select(band), grid, SOILGRIDS_NATIVE_DEG)
-    return next(iter(_fetch(img, grid, SOILGRIDS_NATIVE_DEG, band, verbose, max_input_pixels, workers).values()))
+    _require_band(image, band, spec.path)
+    img = _aggregate(image.select(band), grid, spec.native_deg)
+    return next(iter(_fetch(img, grid, spec.native_deg, band, verbose, max_input_pixels, workers).values()))
 
 
 def load_worldcover_shares(grid: Grid, verbose: bool = True, max_input_pixels: int = MAX_TILE_INPUT_PIXELS,
@@ -259,10 +251,10 @@ def load_worldcover_shares(grid: Grid, verbose: bool = True, max_input_pixels: i
     """Share of fine cells in each WorldCover class, per output cell (one request per tile)."""
     import ee
 
-    wc = ee.ImageCollection(WORLDCOVER).first().select("Map")
+    wc = ee.ImageCollection(LAND_COVER.path).first().select(LAND_COVER.band)
     bands = [wc.eq(code).rename(f"c{code}") for code in WORLDCOVER_CODES]     # masked pixels stay masked
-    img = _aggregate(ee.Image.cat(bands), grid, WORLDCOVER_NATIVE_DEG)
-    out = _fetch(img, grid, WORLDCOVER_NATIVE_DEG, "WorldCover classes", verbose, max_input_pixels, workers)
+    img = _aggregate(ee.Image.cat(bands), grid, LAND_COVER.native_deg)
+    out = _fetch(img, grid, LAND_COVER.native_deg, "land cover classes", verbose, max_input_pixels, workers)
     return {code: out[f"c{code}"] for code in WORLDCOVER_CODES}
 
 
@@ -315,10 +307,10 @@ def load_layers(grid: Grid, groups: Mapping[str, Sequence[int]], cache: LayerCac
                      lambda: {str(c): a for c, a in load_worldcover_shares(grid, **kw).items()})
         shares = {int(k): v for k, v in got.items()}
     notes = [
-        f"slope: {SRTM}, ee.Terrain.slope at native scale, then mean to {grid.resolution_m} m",
+        f"slope: {SLOPE.path}, ee.Terrain.slope at native scale, then mean to {grid.resolution_m} m",
         ("soil: SoilGrids mean predictions 0-5, 5-15, 15-30 cm, thickness-weighted "
          "(scoping proposal planted_topsoil_0_30_v1, not yet selected by CIAT)"),
-        (f"host: {WORLDCOVER} Map band, share of each class averaged to the grid" if host == "apply"
+        (f"host: {LAND_COVER.path} {LAND_COVER.band} band, share of each class averaged to the grid" if host == "apply"
          else "host: gate skipped (WorldCover not read)"),
     ]
     if cache is not None:
@@ -362,22 +354,6 @@ def load_image_band(grid: Grid, image, native_deg: float, label: str, verbose: b
     return _fetch(_aggregate(renamed, grid, native_deg), grid, native_deg, label, verbose, max_input_pixels, workers)["v"]
 
 
-def load_tree_canopy(grid: Grid, asset: str, band: str, **kw) -> np.ndarray:
-    import ee
-
-    img = ee.Image(asset)
-    _require_band(img, band, asset)
-    return load_image_band(grid, img.select(band), SRTM_NATIVE_DEG, "tree canopy", **kw)
-
-
-def load_accessibility(grid: Grid, asset: str, band: str, **kw) -> np.ndarray:
-    import ee
-
-    img = ee.Image(asset)
-    _require_band(img, band, asset)
-    return load_image_band(grid, img.select(band), 30.0 / 3600.0, "accessibility", **kw)
-
-
 def collection_years(asset: str) -> list[int]:
     """The years that have an image in a collection of annual composites (one cheap call to Earth Engine)."""
     from datetime import UTC, datetime
@@ -388,30 +364,52 @@ def collection_years(asset: str) -> list[int]:
     return sorted({datetime.fromtimestamp(t / 1000, UTC).year for t in times})
 
 
-def load_viirs(grid: Grid, asset: str, band: str, year: int | None = None, **kw) -> np.ndarray:
-    """Night-time lights of one year. With year=None, the latest year the asset has."""
+# Named steps that build the image of a variable before it is averaged to the grid (VarSpec.derive).
+def _plain(spec: VarSpec, grid: Grid):
     import ee
 
-    years = collection_years(asset)
+    img = ee.Image(spec.path)
+    _require_band(img, spec.band, spec.path)
+    return img.select(spec.band)
+
+
+def _slope(spec: VarSpec, grid: Grid):
+    import ee
+
+    return ee.Terrain.slope(ee.Image(spec.path).select(spec.band))      # degrees, at the native scale
+
+
+def _annual_composite(spec: VarSpec, grid: Grid):
+    """One year of an annual collection. params["year"] None means the latest year the asset has."""
+    import ee
+
+    years = collection_years(spec.path)
     if not years:
-        raise ValueError(f"{asset} has no images")
-    if year is None:
-        year = years[-1]
+        raise ValueError(f"{spec.path} has no images")
+    year = spec.params.get("year") or years[-1]
     if year not in years:
-        raise ValueError(f"{asset} has no composite for {year}; it has {years[0]} to {years[-1]} ({years}). "
+        raise ValueError(f"{spec.path} has no composite for {year}; it has {years[0]} to {years[-1]} ({years}). "
                          "Set VIIRS_YEAR to one of those years, or to None for the latest.")
-    img = ee.ImageCollection(asset).filterDate(f"{year}-01-01", f"{year + 1}-01-01").first()
-    _require_band(img, band, asset)
-    return load_image_band(grid, img.select(band), 15.0 / 3600.0, f"night lights {year}", **kw)
+    img = ee.ImageCollection(spec.path).filterDate(f"{year}-01-01", f"{year + 1}-01-01").first()
+    _require_band(img, spec.band, spec.path)
+    return img.select(spec.band)
 
 
-def load_wdpa_share(grid: Grid, asset: str, **kw) -> np.ndarray:
-    """Share of each cell inside a designated protected area (context only, not an assessed legal rule)."""
+def _polygon_share(spec: VarSpec, grid: Grid):
+    """1 inside a designated polygon, 0 outside; averaged to the grid it becomes the share of each cell."""
     import ee
 
-    fc = (ee.FeatureCollection(asset)
+    fc = (ee.FeatureCollection(spec.path)
           .filter(ee.Filter.inList("STATUS", ["Designated", "Inscribed", "Established"]))
           .filterBounds(ee.Geometry.Rectangle(list(grid.bbox))))
-    painted = (ee.Image.constant(0).byte().paint(fc, 1)
-               .setDefaultProjection(ee.Projection("EPSG:4326").atScale(30)))
-    return load_image_band(grid, painted, 30.0 / METRES_PER_DEGREE, "protected areas", **kw)
+    return (ee.Image.constant(0).byte().paint(fc, 1)
+            .setDefaultProjection(ee.Projection("EPSG:4326").atScale(spec.native_m)))
+
+
+IMAGE_STEPS = {None: _plain, "slope": _slope, "annual_composite": _annual_composite, "polygon_share": _polygon_share}
+
+
+def load_gee_image(spec: VarSpec, grid: Grid, **kw) -> np.ndarray:
+    """Any single-band Earth Engine variable, averaged to the grid and converted to its unit."""
+    image = IMAGE_STEPS[spec.derive](spec, grid)
+    return load_image_band(grid, image, spec.native_deg, spec.id, **kw) * spec.scale

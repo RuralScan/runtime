@@ -1,7 +1,8 @@
-"""Reading the layers hosted in the Hugging Face dataset (or a local copy of it).
+"""Reading file layers: from a local copy, a Hugging Face dataset (`hf://datasets/<owner>/<name>/<path>`) or any URL.
 
-A file is looked for in the order the caller gives ("local", then "hf"). A local copy keeps the same folder layout
-as the dataset (`raw/<dataset folder>/<file>`), under any root you list in `local_roots`.
+A file is looked for in the order the caller gives ("local", then "hf"). A local copy keeps the dataset's folder
+layout (`raw/<dataset folder>/<file>`) under any root you list in `local_roots`. s3://, gs://, az:// and https://
+paths are opened directly by GDAL.
 
 Large global rasters are not downloaded whole. They are opened over HTTP with GDAL's /vsicurl/ and only the window
 that covers the area is read (`stream`). If streaming does not work on a network, `download` fetches the whole file
@@ -24,7 +25,16 @@ import numpy as np
 from ..grid import Grid
 
 DEFAULT_REPO = "dagudelo30/nbs-ruralscan-data"
-ORIGINS = ("local", "hf-stream", "hf-download")
+HF_PREFIX = "hf://datasets/"
+REMOTE_PREFIXES = ("s3://", "gs://", "az://", "http://", "https://")
+
+
+def split_hf(path: str) -> tuple[str | None, str]:
+    """(repo, path inside it) for an hf://datasets/ path; (None, path) for anything else."""
+    if not path.startswith(HF_PREFIX):
+        return None, path
+    owner, name, rel = path[len(HF_PREFIX):].split("/", 2)
+    return f"{owner}/{name}", rel
 
 
 # files a raster format cannot be read without. An ESRI BIL raster has no dimensions of its own: they are in the .hdr
@@ -75,70 +85,55 @@ def download(rel: str, repo: str = DEFAULT_REPO) -> Path:
     return Path(hf_hub_download(repo_id=repo, filename=rel, repo_type="dataset"))
 
 
-def resolve_file(rel: str, order: Sequence[str] = ("local", "hf"), local_roots: Sequence[Path | str] = (),
-                 repo: str = DEFAULT_REPO, siblings: Sequence[str] = ()) -> tuple[Path, str]:
+def resolve_file(path: str, order: Sequence[str] = ("local", "hf"), local_roots: Sequence[Path | str] = (),
+                 siblings: Sequence[str] = ()) -> tuple[Path, str]:
     """A file on disk, local first and then downloaded. `siblings` are companion files kept next to it.
 
     Returns (path, origin) with origin "local" or "hf-download".
     """
+    repo, rel = split_hf(path)
+    siblings = [split_hf(s)[1] for s in siblings]
     problems = []
     for where in order:
         if where == "local":
             found = find_local(rel, local_roots)
-            if found is not None:
-                for s in siblings:                                           # a shapefile needs .shx, .dbf, ...
-                    if find_local(s, local_roots) is None:
-                        problems.append(f"local copy of {rel} is missing its companion file {s}")
-                        found = None
-                        break
-                if found is not None:
-                    return found, "local"
-            else:
-                problems.append(f"{rel} not found under {[str(r) for r in local_roots] or 'any local root'}")
-        elif where == "hf":
+            missing = [s for s in siblings if find_local(s, local_roots) is None]    # a shapefile needs .shx, .dbf, ...
+            if found and not missing:
+                return found, "local"
+            problems.append(f"local copy of {rel} is missing {missing}" if found else
+                            f"{rel} not found under {[str(r) for r in local_roots] or 'any local root'}")
+        elif where == "hf" and repo:
             try:
-                path = download(rel, repo)
+                got = download(rel, repo)
                 for s in siblings:
                     download(s, repo)
-                return path, "hf-download"
+                return got, "hf-download"
             except (ImportError, OSError) as exc:
                 problems.append(f"could not download {rel} from {repo}: {exc}")
     raise FileNotAvailable("; ".join(problems) or f"{rel}: no place to look in (order={tuple(order)})")
 
 
-def raster_source(rel: str, order: Sequence[str] = ("local", "hf"), local_roots: Sequence[Path | str] = (),
-                  repo: str = DEFAULT_REPO, mode: str = "stream") -> tuple[str, str]:
-    """What rasterio should open for a global raster, and where it came from.
+def raster_source(path: str, order: Sequence[str] = ("local", "hf"), local_roots: Sequence[Path | str] = (),
+                  mode: str = "stream") -> tuple[str, str]:
+    """What rasterio should open for a raster, and where it came from.
 
-    Local first. Otherwise `stream` opens the file over HTTP and reads only the window needed, `download`
-    fetches it once into the Hugging Face cache. Companion files a format needs (the .hdr of a .bil) come with it.
+    A full URL (s3://, gs://, https://, ...) is opened as is. Otherwise as resolve_file, except that `stream` reads
+    only the needed window of a Hugging Face file over HTTP instead of downloading it. Companion files come along.
     """
     if mode not in ("stream", "download"):
         raise ValueError("mode must be 'stream' or 'download'")
-    needs = sidecars_of(rel)
-    problems = []
-    for where in order:
-        if where == "local":
-            found = find_local(rel, local_roots)
-            if found is None:
-                problems.append(f"{rel} not found locally")
-                continue
-            missing = [n for n in needs if find_local(n, local_roots) is None]
-            if missing:
-                problems.append(f"the local copy of {rel} is missing {missing}, which the format needs")
-                continue
-            return str(found), "local"
-        elif where == "hf":
-            if mode == "stream":
-                return "/vsicurl/" + hf_url(rel, repo), "hf-stream"
-            try:
-                path = download(rel, repo)
-                for n in needs:
-                    download(n, repo)
-                return str(path), "hf-download"
-            except (ImportError, OSError) as exc:
-                problems.append(f"could not download {rel}: {exc}")
-    raise FileNotAvailable("; ".join(problems))
+    if path.startswith(REMOTE_PREFIXES):             # rasterio opens these itself and reads only the window
+        return path, "remote"
+    repo, rel = split_hf(path)
+    stream = mode == "stream" and repo and "hf" in order
+    try:
+        found, origin = resolve_file(path, [o for o in order if not (stream and o == "hf")], local_roots,
+                                     sidecars_of(path))
+        return str(found), origin
+    except FileNotAvailable:
+        if stream:
+            return "/vsicurl/" + hf_url(rel, repo), "hf-stream"
+        raise
 
 
 def check_access(repo: str = DEFAULT_REPO, rel: str = "raw/hwsd_v2/HWSD2.hdr", timeout: float = 20.0) -> str:
@@ -170,10 +165,7 @@ def read_raster_to_grid(source: str, grid: Grid, resampling: str = "average", sc
     from rasterio.transform import Affine
     from rasterio.warp import reproject
 
-    methods = {"average": Resampling.average, "mode": Resampling.mode, "nearest": Resampling.nearest,
-               "bilinear": Resampling.bilinear}
-    if resampling not in methods:
-        raise ValueError(f"resampling must be one of {sorted(methods)}")
+    method = Resampling[resampling]          # rasterio's names: average, mode, nearest, bilinear, max, ...
     minx, _, _, maxy = grid.bbox
     r = grid.resolution_deg
     dst_transform = Affine(r, 0.0, minx, 0.0, -r, maxy)
@@ -192,7 +184,7 @@ def read_raster_to_grid(source: str, grid: Grid, resampling: str = "average", sc
             src_nodata = src.nodata
             reproject(
                 source=rasterio.band(src, 1), destination=dst, dst_transform=dst_transform, dst_crs="EPSG:4326",
-                src_crs=src.crs or "EPSG:4326", src_nodata=src_nodata, dst_nodata=np.nan, resampling=methods[resampling],
+                src_crs=src.crs or "EPSG:4326", src_nodata=src_nodata, dst_nodata=np.nan, resampling=method,
             )
     except OSError as exc:
         if source.startswith("/vsicurl/"):

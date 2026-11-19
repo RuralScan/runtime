@@ -13,14 +13,13 @@ import numpy as np
 
 from ..firstpass import Layers
 from ..rasters import (
-    PH_X10_TO_PH,
-    SOC_DG_PER_KG_TO_G_PER_KG,
     TOPSOIL_LAYERS,
     host_fractions_from_shares,
     share_sum_warnings,
     soil_value_warnings,
     thickness_weighted,
 )
+from ..variables import BY_ID
 
 
 def assemble_layers(
@@ -32,8 +31,9 @@ def assemble_layers(
     notes: Sequence[str] = (),
 ) -> Layers:
     """With shares=None the host gate is NOT applied: every cell counts as host (an exploratory overview)."""
-    soc_by = {d: np.asarray(a, dtype=float) * SOC_DG_PER_KG_TO_G_PER_KG for d, a in soc_raw.items()}
-    ph_by = {d: np.asarray(a, dtype=float) * PH_X10_TO_PH for d, a in ph_raw.items()}
+    soc_scale, ph_scale = BY_ID["soil_organic_carbon"].scale, BY_ID["soil_ph"].scale     # set in the registry
+    soc_by = {d: np.asarray(a, dtype=float) * soc_scale for d, a in soc_raw.items()}
+    ph_by = {d: np.asarray(a, dtype=float) * ph_scale for d, a in ph_raw.items()}
     soc = thickness_weighted([soc_by[d] for d in TOPSOIL_LAYERS])
     ph = thickness_weighted([ph_by[d] for d in TOPSOIL_LAYERS])
     slope = np.asarray(slope_deg, dtype=float)

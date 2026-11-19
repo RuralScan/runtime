@@ -11,8 +11,6 @@ from typing import Any
 import numpy as np
 
 # ---- SoilGrids conversions: "convert each native value once" (DATASET_INPUTS.md) ----
-SOC_DG_PER_KG_TO_G_PER_KG = 0.1      # soc_mean is stored in dg/kg
-PH_X10_TO_PH = 0.1                   # phh2o_mean is stored as pH x 10
 WORLDCOVER_CODES = (10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100)     # ESA WorldCover v200 classes
 TOPSOIL_LAYERS = ("0-5", "5-15", "15-30")
 TOPSOIL_THICKNESS_CM = (5.0, 10.0, 15.0)

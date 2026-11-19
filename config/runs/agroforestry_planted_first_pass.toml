@@ -43,4 +43,3 @@ weight_concentration = 0         # 0 keeps CIAT's weights fixed; for example 20 
 
 [data]
 order = ["local", "hf", "gee"]   # where to look for a layer, in this order
-hf_repo = "dagudelo30/nbs-ruralscan-data"
