@@ -27,18 +27,18 @@ historical packages. Read them on GitHub at the pinned commit when a number need
 
 The default publisher is `CIAT/nbs_ruralscan` under `handoff/`. Existing pins without
 a `source_root` field use that directory. List available package versions with
-`python scripts/sync_upstream.py --list`. To install a reviewed version, run
-`python scripts/sync_upstream.py --ref <commit> --package agroforestry-t4/developer-vX.Y.Z`.
+`uv run python scripts/sync_upstream.py --list`. To install a reviewed version, run
+`uv run python scripts/sync_upstream.py --ref <commit> --package agroforestry-t4/developer-vX.Y.Z`.
 A supplied tag or branch resolves once to a full commit SHA before any package files are fetched.
 
 To check a second GitHub origin, give the repository, directory and commit explicitly.
 This example uses a copy of v0.1.5 and installs it in a separate local store.
 
 ```sh
-python scripts/sync_upstream.py --repo RuralScan/runtime --source-root upstream \
+uv run python scripts/sync_upstream.py --repo RuralScan/runtime --source-root upstream \
   --ref e690d4e413d925c28c273945a5268ddbfb2d67cc --package agroforestry-t4/developer-v0.1.5 \
   --upstream /path/to/scoring-store
-python scripts/sync_upstream.py --check --upstream /path/to/scoring-store
+uv run python scripts/sync_upstream.py --check --upstream /path/to/scoring-store
 ```
 
 Read a separate store with `load_package(Path("/path/to/scoring-store"))` from

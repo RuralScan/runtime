@@ -29,10 +29,10 @@ def plot_comparison(fp: FirstPass, comp: Comparison, grid: Grid, title: str,
         cb = plt.colorbar(im, ax=ax, fraction=0.046)
         cb.set_label(label)
 
-    draw(axes[0, 0], fp.pete, "CIAT: partial terrain-and-soil index", cmap_idx, 0, 1, "index (0-1)")
+    draw(axes[0, 0], fp.baseline_index, "CIAT: partial terrain-and-soil index", cmap_idx, 0, 1, "index (0-1)")
     draw(axes[0, 1], comp.median, "Simulation: median", cmap_idx, 0, 1, "index (0-1)")
     draw(axes[0, 2], comp.width, "Simulation: 5-95% width", "magma", 0, max(0.5, np.nanmax(comp.width) if np.isfinite(comp.width).any() else 0.5), "range of the index")
-    diff = comp.median - fp.pete
+    diff = comp.median - fp.baseline_index
     lim = max(0.1, float(np.nanmax(np.abs(diff)))) if np.isfinite(diff).any() else 0.1
     draw(axes[1, 0], diff, "Median minus CIAT", "RdBu", -lim, lim, "difference")
     draw(axes[1, 1], comp.p_top, "Chance of being in the top third", "viridis", 0, 1, "probability")
@@ -93,11 +93,11 @@ def plot_overview(ov, title: str, footnote: str = "", out_path: Path | None = No
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 8.6))
-    diff = ov.median - ov.ciat
+    diff = ov.median - ov.baseline_index
     lim = max(0.1, float(np.nanmax(np.abs(diff)))) if np.isfinite(diff).any() else 0.1
     wmax = max(0.5, float(np.nanmax(ov.width))) if np.isfinite(ov.width).any() else 0.5
     panels = [
-        (ov.ciat, "CIAT: partial terrain-and-soil index", "YlGn", 0, 1, "mean index of scored cells"),
+        (ov.baseline_index, "CIAT: partial terrain-and-soil index", "YlGn", 0, 1, "mean index of scored cells"),
         (ov.median, "Simulation: median", "YlGn", 0, 1, "mean of the medians"),
         (ov.width, "How much the class numbers matter\n(5-95% width)", "magma", 0, wmax, "range of the index"),
         (diff, "Median minus CIAT", "RdBu", -lim, lim, "difference"),
@@ -200,7 +200,13 @@ def _category_colors(n: int, cmap: str):
     return [base(i / max(n - 1, 1)) for i in range(n)]  # a continuous map: spread the classes along it
 
 
-def plot_variable_audit(audit, grid: Grid, out_path: Path | None = None):
+def draw_boundary(ax, units) -> None:
+    """Outline every admin unit of a GeoDataFrame on a map axis, keeping the axis limits."""
+    ax.autoscale(False)
+    units.boundary.plot(ax=ax, color="#222222", lw=0.8, add_labels=False)
+
+
+def plot_variable_audit(audit, grid: Grid, out_path: Path | None = None, boundary=None):
     """A map of one variable and its distribution (a histogram, or the share of each class)."""
     import matplotlib.colors as mcolors
     import matplotlib.patches as mpatches
@@ -246,6 +252,8 @@ def plot_variable_audit(audit, grid: Grid, out_path: Path | None = None):
             for edge in s.plausible:
                 if known.min() <= edge <= known.max():
                     ax2.axvline(edge, color="#D9822B", ls="--", lw=1)
+    if boundary is not None:
+        draw_boundary(ax1, boundary)
     ax1.set_xlabel("longitude")
     ax1.set_ylabel("latitude")
     fig.text(0.02, 0.905, sub, fontsize=9, color="#555555")
@@ -255,7 +263,7 @@ def plot_variable_audit(audit, grid: Grid, out_path: Path | None = None):
     return fig
 
 
-def plot_group_overview(audits, grid: Grid, title: str, out_path: Path | None = None):
+def plot_group_overview(audits, grid: Grid, title: str, out_path: Path | None = None, boundary=None):
     """Small maps of every variable of a group side by side."""
     import matplotlib.colors as mcolors
     import matplotlib.pyplot as plt
@@ -288,6 +296,8 @@ def plot_group_overview(audits, grid: Grid, title: str, out_path: Path | None = 
             cm = plt.get_cmap(s.cmap).with_extremes(bad="#d9d9d9")
             im = ax.imshow(np.ma.masked_invalid(a.values), cmap=cm, extent=grid.extent, origin="upper")
             plt.colorbar(im, ax=ax, fraction=0.046)
+        if boundary is not None:
+            draw_boundary(ax, boundary)
         ax.tick_params(labelsize=8)
     prefix = "SYNTHETIC TEST: " if any(a.synthetic for a in audits) else ""
     fig.suptitle(prefix + title, fontsize=14, fontweight="bold")

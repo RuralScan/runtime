@@ -35,11 +35,13 @@ To inspect a different version, pass `--pin /path/to/trusted-pin.json` or the Py
 ## Quickstart
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-python scripts/sync_upstream.py --check     # pinned CIAT files are intact
-pytest                                      # CIAT's 40 + 6 cases, plus our own checks
+uv sync                                            # .venv with the runtime and dev tools
+uv run python scripts/sync_upstream.py --check     # pinned CIAT files are intact
+uv run pytest                                      # CIAT's 40 + 6 cases, plus our own checks
+uv run ruff check .                                # lint (optional type check: uv run ty check)
 ```
+
+Notebooks: select `.venv` as the kernel (VS Code), or start Jupyter with `uv run --with jupyter jupyter lab`.
 
 ```python
 from pathlib import Path
@@ -55,14 +57,14 @@ settings, data source). It builds the run configuration, prints what is on hold,
 synthetic data to test the pipeline), computes CIAT's partial terrain-and-soil index, runs the ordinal simulation,
 compares both on maps and saves everything with a manifest to `runs/<fingerprint>/`.
 
-Earth Engine: `pip install -e ".[gee,viz]"` and authenticate once. The notebook works on a 250 m grid, has an
+Earth Engine: `uv sync --extra gee --extra viz` and authenticate once. The notebook works on a 250 m grid, has an
 optional quick check (section 3a) that pulls a small box and maps each layer, and saves every extracted layer in
 `cache/layers/` so Earth Engine is called once. See `docs/DESIGN.md` for why 250 m.
 
 `notebooks/02_variable_audit.ipynb` looks at the variables of an area one by one, in four groups (Climate variables, Soil, Terrain and
 land, Project risk): a map, a histogram, the range, the share with no data, and a CHECK line when something looks wrong. It reads the
 Hugging Face dataset (a local copy first, then only the window over the area) and Earth Engine. Install what it needs with
-`pip install -e ".[audit]"`; the notebook tells you if something is missing in the Python it runs in.
+`uv sync --extra audit`; the notebook tells you if something is missing in the Python it runs in.
 
 
 <a id="how-it-connects-to-ciat"></a>

@@ -5,25 +5,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - run: pip install -e ".[dev]"
-      - run: ruff check .
-      - run: python scripts/sync_upstream.py --check
-      - run: pytest -q
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run python scripts/sync_upstream.py --check
+      - run: uv run pytest -q
       - name: Check the installed recipe reader and bundled pin
         run: |
-          python -m pip install --force-reinstall --no-deps .
-          python -I -m pytest -q -o pythonpath= tests/test_recipe_release.py
+          uv pip install --force-reinstall --no-deps .
+          uv run --no-sync python -I -m pytest -q -o pythonpath= tests/test_recipe_release.py
   # the same tests again with the geospatial libraries installed, so the raster, road and figure tests run
   # instead of being skipped
   geo-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - run: pip install -e ".[dev,geo,hf,viz]"
-      - run: pytest -q -rs
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --extra geo --extra hf --extra viz
+      - run: uv run pytest -q -rs
