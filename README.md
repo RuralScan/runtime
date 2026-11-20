@@ -81,3 +81,28 @@ newer package see [docs/DESIGN.md](docs/DESIGN.md#updating-from-ciat).
 - Record the package pin, function fingerprints and decision references with every run.
 
 Contact: Diego Agudelo, d.agudelo@cgiar.org
+
+## Accepted AI scientific effects
+
+New T3/T6 scientific judgments are authored by AI and accepted in the
+[RuralScan/evidence synthesis workflow](https://github.com/RuralScan/evidence/blob/main/workflows/synthesis/README.md).
+Runtime does not infer direction, strength, confidence, context or weights. Use an
+accepted-effects package with an independently trusted manifest hash:
+
+```python
+from pathlib import Path
+from nbs_runtime.accepted_effects import AcceptedEffects
+
+accepted = AcceptedEffects(Path("/path/to/accepted-effects"), manifest_sha256=TRUSTED_SHA256)
+row = accepted.row("agroforestry", "T6", "accepted_record_id")
+provenance = accepted.provenance("agroforestry", "T6", "accepted_record_id")
+```
+
+The reader checks package inventory, file hashes and exact accepted-row provenance.
+It returns the selected record unchanged. Missing, withdrawn, held or stale records
+cannot become runtime values, and there is no nearest-context or historical fallback.
+Packages may contain only some cells: consumers must explicitly report missing accepted
+outputs. Withdrawal provenance remains readable. Existing pinned recipe-store APIs
+remain historical consumers; they do not confer AI scientific acceptance on old rows.
+This reader supplies accepted scientific values to consumers; it does not add a new
+geospatial calculation or perform fresh scientific synthesis.
