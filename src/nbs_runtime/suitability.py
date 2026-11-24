@@ -4,7 +4,8 @@
 
     L  minimum of the scores of the limiting variables (no weights). The most limiting factor rules,
        so good terrain can never compensate for a climate where the practice does not work.
-    G  eligibility (land cover allowed for the NbS): 1 or 0. No other hard limits.
+    G  eligibility (land cover allowed for the NbS): 1 or 0, NaN where land cover is unknown.
+       No other hard limits.
     M  weighted sum of the scores of the modulating variables, with the recipe weights renormalised
        among them so that they sum to 1. Weights are never renormalised per pixel.
 
@@ -12,7 +13,7 @@ A family with no limiting variable has L = 1; one with no modulating variable ha
 
 Pixel states (precedence from top to bottom):
     NOT_ELIGIBLE      the land cover is not eligible for this NbS
-    NO_DATA           a required input has no data
+    NO_DATA           a required input (or the land cover) has no data
     OUTSIDE_EVIDENCE  a value lies outside the nodes of its recipe: there is no evidence for it
     SCORED            everything known; S can still be 0 if a curve reaches 0
 """
@@ -62,7 +63,7 @@ class Result:
 
     def outside_share(self, inputs: Mapping[str, Any]) -> dict[str, float]:
         """Share of eligible pixels with data whose value is outside each recipe's nodes."""
-        elig = self.G > 0
+        elig = self.G > 0          # NaN compares False: unknown land cover is left out
         out = {}
         for v, zv in self.z.items():
             x = np.asarray(inputs[v], dtype=float)
@@ -92,7 +93,7 @@ def compute(
     """Suitability of one family on a grid.
 
     layers          variable name -> array of raw values (all on the same grid)
-    eligible        boolean array (True = eligible land cover); None means everything is eligible
+    eligible        G: boolean array, or 1/0/NaN (NaN = land cover unknown); None = everything eligible
     weights         "recipe" (renormalised recipe weights) or "equal"
     custom_weights  explicit modulating weights (normalised here); overrides `weights`
     drop            variables left out (used by the leave-one-out sensitivity test)
@@ -109,7 +110,8 @@ def compute(
         raise ValueError(f"layers are not on one grid: {sorted(shapes)}")
     shape = shapes.pop()
 
-    G = np.ones(shape) if eligible is None else np.asarray(eligible, dtype=bool).astype(float)
+    # eligible: booleans, or 1/0 with NaN where the land cover is unknown
+    G = np.ones(shape) if eligible is None else np.asarray(eligible, dtype=float)
     if G.shape != shape:
         raise ValueError("eligible mask is not on the same grid as the layers")
 
@@ -140,7 +142,7 @@ def compute(
     M = np.asarray(M, dtype=float)
 
     S = L * M * G
-    nodata = np.any([np.isnan(arrays[v]) for v in used], axis=0)
+    nodata = np.any([np.isnan(arrays[v]) for v in used], axis=0) | np.isnan(G)
     unknown = np.isnan(S) | np.isnan(L) | np.isnan(M)
 
     status = np.full(shape, SCORED, dtype=np.uint8)

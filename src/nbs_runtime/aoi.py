@@ -1,8 +1,7 @@
 """Area of interest (AOI): what a run covers, and where that boundary comes from.
 
-An admin AOI resolves to its World Bank Admin 0, 1 or 2 polygon (see data/boundaries.py). Until the
-boundary's source is recorded the plan reports a hold, because CIAT's package asks that the
-target area and its source be recorded.
+An admin AOI resolves to its World Bank Admin 0, 1 or 2 polygon (see data/boundaries.py). A bounding box
+without a recorded source is a placeholder, and the plan says so.
 """
 from __future__ import annotations
 

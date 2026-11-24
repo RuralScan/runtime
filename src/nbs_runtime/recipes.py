@@ -256,3 +256,18 @@ def validate_all(root: Path | str = RECIPES_ROOT, roles_path: Path | str = ROLES
         except RecipeError as e:
             problems.append(str(e))
     return problems
+
+
+def describe_roles(root: Path | str = RECIPES_ROOT, roles_path: Path | str = ROLES_PATH) -> dict[str, str]:
+    """variable -> where it is used, e.g. "agroforestry/cross_family: limiting" (families that fail are skipped)."""
+    out: dict[str, list[str]] = {}
+    for nbs, family in discover(root):
+        try:
+            fam = load_family(nbs, family, root, roles_path)
+        except RecipeError:
+            continue
+        w = fam.modulating_weights()
+        for v in fam.variables:
+            tag = f"modulating w={w[v]:.2f}" if v in w else fam.roles[v]
+            out.setdefault(v, []).append(f"{nbs}/{family}: {tag}")
+    return {v: "; ".join(t) for v, t in out.items()}

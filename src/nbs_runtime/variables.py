@@ -1,17 +1,15 @@
 """The variables we can look at for an area, with the group they belong to and where each one comes from.
 
 The catalog is the single place that says what a variable is, which group and subgroup it sits in, its unit,
-where it is read from and what range of values is plausible. Groups follow how CIAT organises the variables
-(its `group_id`: climatic, edaphic, topographic, land use, socio-economic, governance, infrastructure),
-collected under four headings that read naturally in a notebook.
+where it is read from and what range of values is plausible, under four headings that read naturally in a
+notebook.
 
-The role a variable plays in CIAT's package (a score, a gate, a mask, an operational scenario) is NOT written
-here: it is read from the pinned package at run time (`contract_roles`), because those roles change when
-CIAT publishes a new version.
+A recipe (config/recipes/<nbs>/<family>/<variable>.json) is matched to its data by the variable id: every
+variable that has a recipe needs an entry here. The role a variable plays in the index (limiting or
+modulating) is NOT written here: it is in config/roles.toml.
 """
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -72,12 +70,11 @@ CATALOG: tuple[VarSpec, ...] = (
     VarSpec("annual_precipitation", "Annual precipitation", "Climate variables", "Rainfall and temperature",
             "mm/year", FILE, HF + "raw/worldclim_v2_bioclim_precip/wc2.1_30s_bio_12.tif", "WorldClim 2.1, BIO12", 1000,
             cmap="Blues", plausible=(0.0, 6000.0),
-            note="1970-2000 average. CIAT's default binding for this variable points to CHELSA; this is the "
-                 "WorldClim file hosted in the dataset. Confirm which one the policy should use."),
+            note="1970-2000 average (WorldClim file hosted in the dataset)."),
     VarSpec("mean_annual_temperature", "Mean annual temperature", "Climate variables", "Rainfall and temperature",
             "degC", FILE, HF + "raw/worldclim_v2_bioclim_temp/wc2.1_30s_bio_1.tif", "WorldClim 2.1, BIO1", 1000,
             cmap="coolwarm", plausible=(-15.0, 35.0),
-            note="1970-2000 average. CIAT's default binding points to CHELSA; this is the WorldClim file."),
+            note="1970-2000 average (WorldClim file hosted in the dataset)."),
     VarSpec("aridity_index", "Aridity index", "Climate variables", "Dryness",
             "dimensionless", FILE, HF + "raw/global_aridity_index_v3/ai_v31_yr.tif", "Global Aridity Index v3.1", 1000,
             scale=0.0001, cmap="RdYlBu", plausible=(0.0, 3.0),
@@ -101,6 +98,9 @@ CATALOG: tuple[VarSpec, ...] = (
     VarSpec("slope", "Slope", "Terrain and land", "Topography", "degrees", GEE, "USGS/SRTMGL1_003", "SRTM",
             ARCSEC_M, band="elevation", derive="slope", cmap="terrain", plausible=(0.0, 90.0), cost="slow",
             note="Derived at the native 30 m scale and only then averaged to the grid."),
+    VarSpec("elevation", "Elevation", "Terrain and land", "Topography", "m", GEE, "USGS/SRTMGL1_003", "SRTM",
+            ARCSEC_M, band="elevation", cmap="terrain", plausible=(-450.0, 9000.0),
+            note="Mean of the 30 m elevation over each grid cell. Shares the asset with slope."),
     VarSpec("land_cover", "Land cover (dominant class)", "Terrain and land", "Land cover and vegetation",
             "class", GEE, "ESA/WorldCover/v200", "ESA WorldCover 2021", 10, band="Map", derive="class_shares",
             cmap="tab20", kind="categorical", class_labels=LAND_COVER_LABELS, cost="slow",
@@ -109,7 +109,11 @@ CATALOG: tuple[VarSpec, ...] = (
     VarSpec("tree_canopy_cover", "Tree canopy cover", "Terrain and land", "Land cover and vegetation",
             "percent", GEE, "UMD/hansen/global_forest_change_2023_v1_11", "Hansen Global Forest Change (treecover2000)",
             ARCSEC_M, band="treecover2000", cmap="Greens", plausible=(0.0, 100.0), cost="slow",
-            note="Canopy cover in the year 2000. Newer versions of the asset exist; this is the one in CIAT's registry."),
+            note="Canopy cover in the year 2000. Newer versions of the asset exist."),
+    VarSpec("ndvi", "NDVI (annual median)", "Terrain and land", "Land cover and vegetation", "unitless", GEE,
+            "MODIS/061/MOD13Q1", "MODIS Terra vegetation indices, 16-day, 250 m", 250, band="NDVI", scale=0.0001,
+            derive="annual_median", params={"year": 2023}, cmap="YlGn", plausible=(-1.0, 1.0),
+            note="Median of the 16-day composites of one year (set in params), stored x 10,000 and scaled here."),
     # ---------------- Project risk ----------------
     VarSpec("accessibility_travel_time", "Travel time to the nearest city", "Project risk", "Access and energy",
             "minutes", GEE, "Oxford/MAP/accessibility_to_cities_2015_v1_0", "Oxford MAP accessibility 2015",
@@ -130,8 +134,7 @@ CATALOG: tuple[VarSpec, ...] = (
             "Legal and protection", "share 0-1", GEE, "WCMC/WDPA/current/polygons",
             "WDPA (World Database on Protected Areas)", 30, derive="polygon_share", cmap="Purples",
             plausible=(0.0, 1.0), cost="slow",
-            note="Context only. CIAT states that a protected-area category alone does not establish a legal "
-                 "exclusion: that needs an assessed rule."),
+            note="Context only: a protected-area category alone does not establish a legal exclusion."),
 )
 
 BY_ID: dict[str, VarSpec] = {v.id: v for v in CATALOG}
@@ -152,40 +155,19 @@ def select(groups: tuple[str, ...] | list[str] | None = None, skip: tuple[str, .
     return chosen if include_slow else [v for v in chosen if v.cost != "slow"]
 
 
-def contract_roles(pkg) -> dict[str, list[str]]:
-    """The role(s) each variable has in the pinned CIAT package, read at run time (never copied here)."""
-    roles: dict[str, set[str]] = defaultdict(set)
-    for row in pkg.rows.values():
-        roles[row["variable"]].add(row["role"])
-    return {k: sorted(v) for k, v in roles.items()}
-
-
-def policy_variables(pkg, policy_id: str) -> set[str]:
-    """The variables the approved policy actually uses: its scored criteria and its gates."""
-    pol = pkg.policy(policy_id)
-    ids = [c.rule_id for c in pol.criteria] + list(pol.gate_rule_ids)
-    return {pkg.rows[i]["variable"] for i in ids}
-
-
-ROLE_TEXT = {
-    "suitability_score": "scores the index",
-    "eligibility_gate": "host gate",
-    "hard_exclusion": "legal mask",
-    "operational_scenario": "operational (project risk)",
-    "reference_only": "evidence only",
+_UNIT_ALIASES = {
+    "mm/yr": "mm/year", "mm year-1": "mm/year", "mm per year": "mm/year",
+    "deg": "degrees", "degree": "degrees", "°": "degrees",
+    "metres": "m", "meters": "m",
+    "dimensionless": "unitless", "-": "unitless", "": "unitless", "index": "unitless",
+    "°c": "degc", "celsius": "degc",
 }
 
 
-def role_text(var_id: str, roles: Mapping[str, list[str]], policy_vars: set[str] | None = None) -> str:
-    """What a variable does in CIAT's package. With `policy_vars`, a score that the approved policy does not use
-    is said so, instead of being called a score of the index."""
-    if var_id not in roles:
-        return "not in the package"
-    parts = []
-    for r in roles[var_id]:
-        if r == "suitability_score" and policy_vars is not None:
-            parts.append("scores the index (first-pass policy)" if var_id in policy_vars
-                         else "a score in the package, not in the first-pass policy")
-        else:
-            parts.append(ROLE_TEXT.get(r, r))
-    return ", ".join(parts)
+def same_unit(a: str, b: str) -> bool:
+    """Whether a recipe's unit and a catalog unit mean the same thing (a few common spellings accepted).
+
+    A mismatch matters: a slope function in percent applied to a slope in degrees is silently wrong.
+    """
+    norm = lambda u: _UNIT_ALIASES.get(u.strip().lower(), u.strip().lower())
+    return norm(a) == norm(b)

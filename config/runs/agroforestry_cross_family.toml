@@ -1,0 +1,31 @@
+# One file = one run. The recipes it uses are in config/recipes/<nbs>/<family>/ and the roles in
+# config/roles.toml. The notebook's parameters cell can override any value here.
+
+[run]
+nbs = "agroforestry"
+family = "cross_family"
+weights = "recipe"          # recipe: recipe weights renormalised among the modulating variables | equal
+outside = "unknown"         # beyond a recipe's nodes: unknown (not evaluated) | clamp
+
+[aoi]
+kind = "bbox"               # bbox | geojson | admin
+name = "Haiti (approximate box)"
+bbox = [-74.5, 18.0, -71.6, 20.1]   # minx, miny, maxx, maxy, EPSG:4326
+source = ""                 # where the boundary comes from; an admin AOI (World Bank boundaries) records it
+
+[grid]
+resolution_m = 1000
+
+[eligibility]
+mode = "apply"              # apply: read ESA WorldCover | skip: every cell eligible (quick look)
+classes = [30, 40]          # grassland, cropland
+min_share = 0.5             # a cell is eligible when these classes cover at least half of it
+
+[sensitivity]
+n_draws = 300               # Dirichlet draws of the modulating weights
+concentration = 50.0        # larger keeps the draws closer to the recipe weights
+seed = 20261124
+
+[data]
+order = ["local", "hf"]     # where a dataset file is looked for
+hf_mode = "stream"          # stream: read only the window over HTTP | download: whole files once

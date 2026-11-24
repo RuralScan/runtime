@@ -6,7 +6,7 @@ import pytest
 from nbs_runtime.aoi import AOI
 from nbs_runtime.runconfig import RunConfig
 
-CFG = Path(__file__).resolve().parents[1] / "config" / "runs" / "agroforestry_planted_first_pass.toml"
+CFG = Path(__file__).resolve().parents[1] / "config" / "runs" / "agroforestry_cross_family.toml"
 HAITI = (-74.5, 18.0, -71.6, 20.1)
 
 
@@ -51,29 +51,35 @@ def test_fingerprint_changes_with_the_area_and_its_source():
 def test_config_loads_and_validates():
     cfg = RunConfig.load(CFG)
     assert cfg.validate() == []
+    assert (cfg.run.nbs, cfg.run.family) == ("agroforestry", "cross_family")
     assert cfg.aoi.bbox == HAITI
-    assert cfg.simulation.n_draws == 5000 and cfg.simulation.seed == 20261103
-    assert cfg.data.order == ("local", "hf", "gee")
+    assert cfg.eligibility.classes == (30, 40)
+    assert cfg.data.order == ("local", "hf")
 
 
 def test_overrides_are_merged_by_section():
-    cfg = RunConfig.load(CFG, {"grid": {"resolution_m": 1000}, "simulation": {"seed": 1}})
-    assert cfg.grid.resolution_m == 1000 and cfg.simulation.seed == 1
-    assert cfg.simulation.n_draws == 5000          # untouched keys survive
+    cfg = RunConfig.load(CFG, {"grid": {"resolution_m": 5000}, "sensitivity": {"seed": 1}})
+    assert cfg.grid.resolution_m == 5000 and cfg.sensitivity.seed == 1
+    assert cfg.sensitivity.n_draws == 300          # untouched keys survive
 
 
 def test_a_typo_is_an_error_not_a_silent_default():
     with pytest.raises(ValueError):
-        RunConfig.from_dict({"simulation": {"n_draw": 10}})
+        RunConfig.from_dict({"sensitivity": {"n_draw": 10}})
     with pytest.raises(ValueError):
-        RunConfig.from_dict({"simulaton": {}})
+        RunConfig.from_dict({"sensitivty": {}})
 
 
 def test_invalid_values_are_reported():
-    bad = RunConfig.from_dict({"aoi": {"bbox": list(HAITI)},
-                               "simulation": {"scale_mode": "mixed", "n_draws": 0},
-                               "grid": {"resolution_m": 0}, "data": {"order": ["local", "disk"]}})
-    assert len(bad.validate()) == 4
+    bad = RunConfig.from_dict({
+        "aoi": {"bbox": list(HAITI)},
+        "run": {"weights": "critic", "outside": "extrapolate"},
+        "eligibility": {"classes": [40, 41], "min_share": 0},
+        "sensitivity": {"n_draws": 0},
+        "grid": {"resolution_m": 0},
+        "data": {"order": ["local", "disk"]},
+    })
+    assert len(bad.validate()) == 7
 
 
 def test_an_empty_aoi_is_reported():
@@ -83,11 +89,6 @@ def test_an_empty_aoi_is_reported():
 def test_fingerprint_follows_the_config():
     a = RunConfig.load(CFG)
     assert a.fingerprint() == RunConfig.load(CFG).fingerprint()
-    assert a.fingerprint() != RunConfig.load(CFG, {"simulation": {"seed": 2}}).fingerprint()
-    assert json.loads(a.to_json())["aoi"]["bbox"] == list(HAITI)
-
-
-def test_run_mode_is_validated_and_defaults_to_exploratory():
-    assert RunConfig.load(CFG).run.mode == "exploratory"
-    assert RunConfig.load(CFG, {"run": {"mode": "policy"}}).validate() == []
-    assert any("run.mode" in m for m in RunConfig.load(CFG, {"run": {"mode": "quick"}}).validate())
+    assert a.fingerprint() != RunConfig.load(CFG, {"run": {"weights": "equal"}}).fingerprint()
+    d = json.loads(a.to_json())
+    assert d["aoi"]["bbox"] == list(HAITI) and d["eligibility"]["classes"] == [30, 40]

@@ -1,14 +1,82 @@
 # nbs-ruralscan-runtime
 
-Runtime for **NbS Rural Scan**. It reads the generated T4 developer package published by
-[CIAT/nbs_ruralscan](https://github.com/CIAT/nbs_ruralscan) (methodology and evidence live
-there) and turns it into spatial results. This repository holds no methodology.
+Runtime for **NbS Rural Scan**. It takes the recipes produced by the evidence skill (one file per variable:
+a suitability function and a weight) and turns them into suitability maps, with the uncertainty that comes
+with them. The methodology is approach 3 of the RuralScan MCDA methodology:
 
-Current scope: the approved **planted-silvoarable first pass** (agroforestry): slope 50%,
-soil organic carbon 25%, pH 25%, plus a host gate and a legal-exclusion mask. It is a
-partial terrain-and-soil index, not complete agroforestry suitability.
+**S = L · G · M**
 
-## Read a six-practice recipe release
+- **L**: the lowest score among the *limiting* variables (no weights): the most limiting factor rules.
+- **G**: 1 where the land cover is one where the NbS can be implemented, 0 where not.
+- **M**: the weighted sum of the *modulating* scores, recipe weights renormalised among them.
+
+A value outside the nodes of its recipe has no evidence behind it: the cell is *not evaluated*, never 0.
+
+## Inputs
+
+| What | Where | Who writes it |
+|---|---|---|
+| Recipes: function (`x`, `score`, linear) and `weight` per variable | `config/recipes/<nbs>/<family>/<variable>.json` | the evidence skill |
+| Role of each variable: `limiting` or `modulating` | `config/roles.toml` (default, with per-NbS overrides) | runtime |
+| Datasets: where each variable is read from, unit, scale | `src/nbs_runtime/variables.py` | runtime |
+| A run: area, grid, eligible land cover, sensitivity | `config/runs/*.toml` (and the notebook's parameters cell) | user |
+
+The runtime never changes a recipe. A recipe that does not validate, a variable with no role or no dataset,
+or a unit that differs between the recipe and the dataset blocks the run (`plan()` lists it).
+
+## Quickstart
+
+```bash
+uv sync                                                   # runtime and dev tools
+uv run pytest                                             # tests
+uv run ruff check .                                       # lint
+uv run python scripts/demo_suitability.py --png demo.png  # the whole index on synthetic layers, no Earth Engine
+```
+
+Notebooks: select `.venv` as the kernel (VS Code), or `uv run --with jupyter jupyter lab`.
+
+- `notebooks/01_suitability.ipynb` runs the whole workflow, one step per section: recipes and their curves,
+  plan, grid, inputs, scores, L, G, M and S, one pixel explained step by step, classes, sensitivity
+  (equal weights, Dirichlet weights, leave one variable out) and the outputs (GeoTIFFs, arrays and a manifest
+  in `runs/<nbs>-<family>-<fingerprint>-<source>/`). Set `DATA_SOURCE = "synthetic"` to try it offline.
+- `notebooks/02_variable_audit.ipynb` looks at every catalog variable of an area one by one (map, histogram,
+  range, share with no data, a CHECK line when something looks wrong) and says where each is used in the recipes.
+
+Earth Engine: `uv sync --extra gee --extra viz --extra geo` and authenticate once (the project id is read from
+`EE_PROJECT` in `.env`). Every extracted layer is saved in `cache/layers/`, so Earth Engine is called once per
+grid. `scripts/check_gee.py` loads every variable of a family on a tiny box first.
+
+```python
+from nbs_runtime.recipes import load_family
+from nbs_runtime.suitability import compute, classify
+
+fam = load_family("agroforestry", "cross_family")
+result = compute(fam, layers, eligible)       # layers: {variable: array}, eligible: G (1/0/NaN)
+classes = classify(result.S)
+```
+
+## Adding an NbS or a family
+
+1. The skill writes `config/recipes/<nbs>/<family>/<variable>.json`.
+2. Give every new variable a role in `config/roles.toml` (or an override under `[<nbs>]`).
+3. Give every new variable a catalog entry in `variables.py` (dataset, unit, scale).
+4. `uv run pytest tests/test_recipes.py tests/test_variables.py` checks all three.
+5. Run the notebook with `NBS` and `FAMILY` set.
+
+## Rules
+
+- Unknown is never zero: no data, or a value outside the evidence, leaves a cell not evaluated.
+- Limiting variables carry no weight; modulating weights are never renormalised per pixel.
+- Operational factors (roads, market, tenure) and opportunity variables stay outside the suitability score.
+- Every run records the recipe hashes, the roles, the weights used and the configuration (`manifest.json`).
+
+Contact: Diego Agudelo, d.agudelo@cgiar.org
+
+## Other readers (under review)
+
+The two readers below come from earlier pull requests and are not used by the suitability workflow.
+
+### Read a six-practice recipe release
 
 Install the runtime with `pip install .`. With an authorised copy of the release store on disk, run the inspection command.
 
@@ -32,57 +100,7 @@ Each practice supplies its T0 definition and authored settings, T3, T4, T6 and T
 
 To inspect a different version, pass `--pin /path/to/trusted-pin.json` or the Python keyword `pin=Path(...)`. Obtain that pin independently of the supplied release files. It specifies the release ID, source revision and complete practice list. Keep the pin alongside the analysis that used it.
 
-## Quickstart
-
-```bash
-uv sync                                            # .venv with the runtime and dev tools
-uv run python scripts/sync_upstream.py --check     # pinned CIAT files are intact
-uv run pytest                                      # CIAT's 40 + 6 cases, plus our own checks
-uv run ruff check .                                # lint (optional type check: uv run ty check)
-```
-
-Notebooks: select `.venv` as the kernel (VS Code), or start Jupyter with `uv run --with jupyter jupyter lab`.
-
-```python
-from pathlib import Path
-from nbs_runtime.plan import plan
-
-p = plan(Path("config/runs/agroforestry_planted_first_pass.toml"))
-print(p.package_version, p.package_ref[:8])
-print(*p.holds, sep="\n")      # open decisions that block a run
-```
-
-The notebook `notebooks/01_agroforestry.ipynb` has one parameters cell (AOI, grid, decisions, simulation
-settings, data source). It builds the run configuration, prints what is on hold, loads the layers (Earth Engine, or
-synthetic data to test the pipeline), computes CIAT's partial terrain-and-soil index, runs the ordinal simulation,
-compares both on maps and saves everything with a manifest to `runs/<fingerprint>/`.
-
-Earth Engine: `uv sync --extra gee --extra viz` and authenticate once. The notebook works on a 250 m grid, has an
-optional quick check (section 3a) that pulls a small box and maps each layer, and saves every extracted layer in
-`cache/layers/` so Earth Engine is called once. See `docs/DESIGN.md` for why 250 m.
-
-`notebooks/02_variable_audit.ipynb` looks at the variables of an area one by one, in four groups (Climate variables, Soil, Terrain and
-land, Project risk): a map, a histogram, the range, the share with no data, and a CHECK line when something looks wrong. It reads the
-Hugging Face dataset (a local copy first, then only the window over the area) and Earth Engine. Install what it needs with
-`uv sync --extra audit`; the notebook tells you if something is missing in the Python it runs in.
-
-
-## How it connects to CIAT
-
-`upstream/` holds a read-only, hash-verified copy of one immutable package version
-(about 0.7 MB). `upstream/PIN.json` records the CIAT commit and file hashes. To adopt a
-newer package see [docs/DESIGN.md](docs/DESIGN.md#updating-from-ciat).
-
-## Rules (from the CIAT handoff)
-
-- Never edit `upstream/`; report contract gaps to CIAT instead of fixing values here.
-- Unknown is never zero. Masks carry no weight. No per-pixel weight renormalisation.
-- Operational factors (roads, market, tenure) stay outside the suitability score.
-- Record the package pin, function fingerprints and decision references with every run.
-
-Contact: Diego Agudelo, d.agudelo@cgiar.org
-
-## Accepted AI scientific effects
+### Accepted AI scientific effects
 
 New T3/T6 scientific judgments are authored by AI and accepted in the
 [RuralScan/evidence synthesis workflow](https://github.com/RuralScan/evidence/blob/main/workflows/synthesis/README.md).

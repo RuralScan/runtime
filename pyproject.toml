@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nbs-ruralscan-runtime"
 version = "0.0.1"
-description = "Runtime for NbS Rural Scan: reads CIAT's generated T4 developer package and runs the pipeline."
+description = "Runtime for NbS Rural Scan: applies the evidence skill's recipes to spatial data (suitability, approach 3)."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []                      # core logic is pure Python on purpose

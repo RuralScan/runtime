@@ -1,12 +1,11 @@
 
 from nbs_runtime import variables as V
-
-POLICY = "planted_terrain_soil_v1"
+from nbs_runtime.recipes import discover, load_recipe
 
 
 def test_every_variable_has_one_id_one_group_and_one_subgroup():
     ids = [v.id for v in V.CATALOG]
-    assert len(ids) == len(set(ids)) == 13
+    assert len(ids) == len(set(ids)) == 15
     assert {v.group for v in V.CATALOG} == set(V.GROUPS)
     tree = V.by_group()
     assert list(tree) == list(V.GROUPS)
@@ -51,20 +50,15 @@ def test_select_by_group_skip_and_cost():
     assert [v.id for v in V.select(["Soil"], skip=["soil_ph"])] == ["soil_organic_carbon", "soil_drainage"]
 
 
-def test_roles_come_from_the_pinned_package_not_from_the_catalog(pkg):
-    roles = V.contract_roles(pkg)
-    assert roles["slope"] == ["suitability_score"]
-    assert roles["land_cover"] == ["eligibility_gate"]
-    assert roles["protected_area_status"] == ["hard_exclusion"]
-    assert V.role_text("slope", roles) == "scores the index"
-    assert V.role_text("aridity_index", roles) == "not in the package"
-    assert "operational" in V.role_text("accessibility_travel_time", roles)
+def test_terrain_and_vegetation_variables_of_the_recipes():
+    assert V.BY_ID["elevation"].path == V.BY_ID["slope"].path           # one asset, two variables
+    ndvi = V.BY_ID["ndvi"]
+    assert ndvi.scale == 0.0001 and ndvi.derive == "annual_median" and ndvi.params["year"]
 
 
-def test_a_score_the_policy_does_not_use_is_not_called_a_score_of_the_index(pkg):
-    roles = V.contract_roles(pkg)
-    used = V.policy_variables(pkg, POLICY)
-    assert used == {"slope", "soil_organic_carbon", "soil_ph", "land_cover", "protected_area_status"}
-    assert V.role_text("slope", roles, used) == "scores the index (first-pass policy)"
-    assert V.role_text("annual_precipitation", roles, used) == "a score in the package, not in the first-pass policy"
-    assert V.role_text("land_cover", roles, used) == "host gate"
+def test_every_recipe_variable_has_a_catalog_entry_with_the_same_unit():
+    for files in discover().values():
+        for path in files:
+            r = load_recipe(path)
+            assert r.variable in V.BY_ID, f"{path}: no catalog entry"
+            assert V.same_unit(r.unit, V.BY_ID[r.variable].unit), f"{path}: unit {r.unit!r}"

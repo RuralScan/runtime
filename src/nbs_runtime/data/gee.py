@@ -1,56 +1,50 @@
-"""Earth Engine adapter for CIAT's first pass. Thin on purpose: no analytical rule lives here.
+"""Earth Engine adapter. Thin on purpose: no analytical rule lives here.
 
-It follows DATASET_INPUTS.md (developer-v0.1.5):
-  slope  USGS/SRTMGL1_003, `elevation` band. Slope in degrees is derived at the native ~30 m scale and
-         only then aggregated (mean) to the output grid. A coarser grid must not redefine the
-         derivative scale, so the elevation is never resampled before the slope is taken.
-  soil   projects/soilgrids-isric/soc_mean and phh2o_mean, depths 0-5, 5-15 and 15-30 cm. Values are
-         returned as stored; conversion (dg/kg x 0.1, pH x10 x 0.1) happens once, in rasters.py.
-  host   ESA/WorldCover/v200 `Map` band. Class codes are never interpolated: the share of fine cells in
-         EACH class is averaged to the output grid. Which classes count as host is decided later, from
-         CIAT's gate, so a change in the gate never needs a new extraction.
+Each catalog variable read from Earth Engine (variables.py, source GEE) is built as one image, averaged to
+the output grid in tiles and returned as a numpy array in its unit. Scale-dependent derivatives are taken at
+the native resolution before averaging: slope is computed from the 30 m SRTM elevation and only then
+averaged, never from a resampled elevation. Land cover is returned as the share of each WorldCover class in
+every cell, so a change in the eligible classes never needs a new extraction.
 
 Masked or missing values come back as NaN (unknown). Nothing is filled with a mean or a mode.
 
-Requests are split into small tiles of the output grid. Taking the slope at 30 m means Earth Engine reads
-every fine pixel under each output cell, so one request for a whole country exceeds the memory Earth Engine
-gives a user ("User memory limit exceeded"). Each tile is sized so that it reads at most
-MAX_TILE_INPUT_PIXELS fine pixels; lower it if a tile still fails.
+Requests are split into small tiles of the output grid so that a tile reads at most MAX_TILE_INPUT_PIXELS
+fine pixels (one request for a whole country exceeds Earth Engine's per-user memory). Lower it if a tile
+still fails. Each layer can be saved in a LayerCache (cache.py) so it is extracted once.
 
-Each layer is extracted once and saved in a LayerCache (see cache.py); a second run, or a new CIAT
-package version, reads the cache and does not call Earth Engine.
-
-NOT TESTED OFFLINE: this module needs earthengine-api, xee and an authenticated session. The notebook's
-quick check (section 3a) pulls a small box and maps every layer, so read it before a full run.
+NOT TESTED OFFLINE: this module needs earthengine-api, xee and an authenticated session.
 """
 from __future__ import annotations
 
 import math
 import os
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
 
-from ..firstpass import Layers
 from ..grid import Grid
 from ..rasters import TOPSOIL_LAYERS, WORLDCOVER_CODES
-from ..variables import BY_ID, VarSpec
-from .assemble import assemble_layers
+from ..variables import BY_ID, CATALOG, GEE, VarSpec
 from .cache import LayerCache
 
-# The first-pass layers. Their datasets are set in the variable registry (variables.py), not here.
+# Datasets are set in the variable registry (variables.py), not here.
 SLOPE = BY_ID["slope"]
 LAND_COVER = BY_ID["land_cover"]
 SOILGRIDS = {v.params["variable"]: v for v in (BY_ID["soil_organic_carbon"], BY_ID["soil_ph"])}
-# what is recorded in the cache key: change any of these and a new cache folder is used
-ASSET_IDS = {
-    "slope": f"{SLOPE.path} {SLOPE.band}, ee.Terrain.slope at native scale, mean to grid",
-    **{var: f"{v.path} depths 0-5, 5-15, 15-30 cm, as stored" for var, v in SOILGRIDS.items()},
-    "host": f"{LAND_COVER.path} {LAND_COVER.band}, share of each class, mean to grid",
-}
+
+
+def cache_assets(specs: Iterable[VarSpec] = CATALOG) -> dict[str, str]:
+    """What is recorded in a cache key: the asset, band, derivation and parameters of each GEE variable.
+
+    Change any of them (in variables.py) and a new cache folder is used; nothing is overwritten.
+    """
+    return {v.id: f"{v.path} {v.band} {v.derive} {dict(v.params)}" for v in specs if v.source == GEE}
+
+
+ASSET_IDS = cache_assets()
 MAX_PIXELS_PER_OUTPUT = 1024                         # Earth Engine's limit for reduceResolution
 MAX_TILE_INPUT_PIXELS = 2_500_000                    # fine pixels one tile may read
 MAX_TILE_CELLS = 256                                 # at most 256 x 256 output cells per tile
@@ -218,12 +212,15 @@ def _fetch(image, grid: Grid, native_deg: float, label: str, verbose: bool = Tru
     return out
 
 
-def request_plan(grid: Grid, host: str = "apply", max_input_pixels: int = MAX_TILE_INPUT_PIXELS) -> dict[str, int]:
-    """How many Earth Engine requests an extraction will make, per layer, before it starts."""
-    n = lambda spec: len(tile_plan(grid, spec.native_deg, max_input_pixels))
-    plan = {"slope": n(SLOPE), "soil (6 bands)": 6 * n(SOILGRIDS["soc"])}
-    if host == "apply":
-        plan["land cover (11 classes)"] = n(LAND_COVER)
+def request_plan(specs: Iterable[VarSpec], grid: Grid,
+                 max_input_pixels: int = MAX_TILE_INPUT_PIXELS) -> dict[str, int]:
+    """How many Earth Engine requests loading these variables will make, before it starts."""
+    plan = {}
+    for v in specs:
+        if v.source != GEE:
+            continue
+        n = len(tile_plan(grid, v.native_deg, max_input_pixels))
+        plan[v.id] = n * (len(TOPSOIL_LAYERS) if v.derive == "soilgrids_0_30" else 1)
     plan["total"] = sum(plan.values())
     return plan
 
@@ -258,68 +255,8 @@ def load_worldcover_shares(grid: Grid, verbose: bool = True, max_input_pixels: i
     return {code: out[f"c{code}"] for code in WORLDCOVER_CODES}
 
 
-class MissingLayersError(RuntimeError):
-    """cache_only was asked for, but some layers are not in the cache yet."""
-
-
-def load_layers(grid: Grid, groups: Mapping[str, Sequence[int]], cache: LayerCache | None = None,
-                verbose: bool = True, max_input_pixels: int = MAX_TILE_INPUT_PIXELS,
-                host: str = "apply", cache_only: bool = False, workers: int = 1) -> Layers:
-    """All first-pass layers on the grid. With a cache, each layer is read from it or fetched and saved.
-
-    host="apply"  extract the WorldCover class shares (the slowest layer) and apply CIAT's host gate;
-    host="skip"   never touch WorldCover: every cell counts as host (exploratory overview, labelled);
-    cache_only    never call Earth Engine: use what is cached and say what is missing.
-    """
-    if host not in ("apply", "skip"):
-        raise ValueError("host must be 'apply' or 'skip'")
-
-    def cached(name: str, fetch):
-        if cache is not None:
-            got = cache.get(name)
-            if got is not None:
-                if verbose:
-                    print(f"  {name}: from cache")
-                return got
-        if cache_only:
-            raise MissingLayersError(name)
-        arrays = fetch()
-        if cache is not None:
-            cache.put(name, arrays)
-        return arrays
-
-    kw = {"verbose": verbose, "max_input_pixels": max_input_pixels, "workers": workers}
-    needed = ["slope", *[f"soc_{d}" for d in TOPSOIL_LAYERS], *[f"phh2o_{d}" for d in TOPSOIL_LAYERS]]
-    if host == "apply":
-        needed.append("worldcover_shares")
-    if cache_only:
-        missing = [n for n in needed if cache is None or not cache.has(n)]
-        if missing:
-            raise MissingLayersError(f"not in the cache yet: {', '.join(missing)}")
-    slope = cached("slope", lambda: {"slope": load_slope(grid, **kw)})["slope"]
-    soc_raw = {d: cached(f"soc_{d}", lambda d=d: {"v": load_soilgrids_band(grid, "soc", d, **kw)})["v"]
-               for d in TOPSOIL_LAYERS}
-    ph_raw = {d: cached(f"phh2o_{d}", lambda d=d: {"v": load_soilgrids_band(grid, "phh2o", d, **kw)})["v"]
-              for d in TOPSOIL_LAYERS}
-    shares = None
-    if host == "apply":
-        got = cached("worldcover_shares",
-                     lambda: {str(c): a for c, a in load_worldcover_shares(grid, **kw).items()})
-        shares = {int(k): v for k, v in got.items()}
-    notes = [
-        f"slope: {SLOPE.path}, ee.Terrain.slope at native scale, then mean to {grid.resolution_m} m",
-        ("soil: SoilGrids mean predictions 0-5, 5-15, 15-30 cm, thickness-weighted "
-         "(scoping proposal planted_topsoil_0_30_v1, not yet selected by CIAT)"),
-        (f"host: {LAND_COVER.path} {LAND_COVER.band} band, share of each class averaged to the grid" if host == "apply"
-         else "host: gate skipped (WorldCover not read)"),
-    ]
-    if cache is not None:
-        notes.append(f"layer cache: {cache.dir}")
-    return assemble_layers(slope, soc_raw, ph_raw, shares, groups, notes)
-
-
 # ---------------------------------------------------------------------------
-# Single-image variables for the variable audit (project risk, canopy cover)
+# Single-image variables
 # ---------------------------------------------------------------------------
 def cached_arrays(cache: LayerCache | None, name: str, fetch, verbose: bool = True):
     """Read a layer from the cache, or fetch it and save it. `fetch` returns {name: array}."""
@@ -395,6 +332,20 @@ def _annual_composite(spec: VarSpec, grid: Grid):
     return img.select(spec.band)
 
 
+def _annual_median(spec: VarSpec, grid: Grid):
+    """Median of every image of one year in a collection (for example 16-day NDVI composites)."""
+    import ee
+
+    year = spec.params.get("year")
+    if not year:
+        raise ValueError(f"{spec.id}: set params['year'] in variables.py")
+    col = (ee.ImageCollection(spec.path).filterDate(f"{year}-01-01", f"{year + 1}-01-01")
+           .filterBounds(ee.Geometry.Rectangle(list(grid.bbox))).select(spec.band))
+    if col.size().getInfo() == 0:
+        raise ValueError(f"{spec.path} has no images for {year} over this area")
+    return col.median().setDefaultProjection(col.first().projection())
+
+
 def _polygon_share(spec: VarSpec, grid: Grid):
     """1 inside a designated polygon, 0 outside; averaged to the grid it becomes the share of each cell."""
     import ee
@@ -406,7 +357,8 @@ def _polygon_share(spec: VarSpec, grid: Grid):
             .setDefaultProjection(ee.Projection("EPSG:4326").atScale(spec.native_m)))
 
 
-IMAGE_STEPS = {None: _plain, "slope": _slope, "annual_composite": _annual_composite, "polygon_share": _polygon_share}
+IMAGE_STEPS = {None: _plain, "slope": _slope, "annual_composite": _annual_composite,
+               "annual_median": _annual_median, "polygon_share": _polygon_share}
 
 
 def load_gee_image(spec: VarSpec, grid: Grid, **kw) -> np.ndarray:

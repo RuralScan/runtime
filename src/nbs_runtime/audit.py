@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .data.variables_loader import VariableData
-from .variables import CATALOG, VarSpec, role_text
+from .variables import CATALOG, VarSpec
 
 
 @dataclass
@@ -75,9 +75,12 @@ def audit_data(data: VariableData, unknown_flag_share: float = 0.5, outside_flag
     return a
 
 
-def summary_rows(audits: Mapping[str, Audit], roles: Mapping[str, list[str]] | None = None,
-                 policy_vars: set[str] | None = None) -> list[dict]:
-    """One row per variable, in catalog order (so the groups and subgroups stay together)."""
+def summary_rows(audits: Mapping[str, Audit], roles: Mapping[str, str] | None = None) -> list[dict]:
+    """One row per variable, in catalog order (so the groups and subgroups stay together).
+
+    roles: variable -> what it does in the recipes (recipes.describe_roles()); variables not in any
+    recipe are labelled so.
+    """
     rows = []
     for spec in CATALOG:
         a = audits.get(spec.id)
@@ -88,7 +91,7 @@ def summary_rows(audits: Mapping[str, Audit], roles: Mapping[str, list[str]] | N
             "dataset": spec.dataset, "origin": a.origin or "not loaded",
             "native_m": spec.native_m, "min": a.vmin, "max": a.vmax, "mean": a.vmean,
             "unknown_pct": 100 * a.unknown_share if a.n_cells else float("nan"),
-            "role_in_ciat_package": role_text(spec.id, roles, policy_vars) if roles is not None else "",
+            "role_in_recipes": (roles.get(spec.id, "not in any recipe") if roles is not None else ""),
             "flags": "; ".join(a.flags),
         })
     return rows

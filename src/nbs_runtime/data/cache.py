@@ -1,8 +1,8 @@
 """A per-layer cache of what was extracted from Earth Engine, so it is extracted once.
 
-The cache holds RAW extracted arrays (slope, SoilGrids as stored, land-cover class shares). Nothing in
-it depends on CIAT's package: a new package version, a different gate or another weight policy reuses
-the same files and never calls Earth Engine again. Each layer is saved as soon as it is fetched, so an
+The cache holds RAW extracted arrays (slope, elevation, NDVI, SoilGrids as stored, land-cover class shares).
+Nothing in it depends on the recipes: new recipes, other eligible classes or other weights reuse the same
+files and never call Earth Engine again. Each layer is saved as soon as it is fetched, so an
 interrupted run resumes where it stopped.
 
 A cache folder is keyed by the grid (extent, resolution, shape) and by the assets and methods used. Change

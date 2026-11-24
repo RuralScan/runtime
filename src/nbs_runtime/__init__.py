@@ -1,5 +1,5 @@
-"""NbS Rural Scan runtime. Consumes CIAT's pinned T4 developer package."""
+"""NbS Rural Scan runtime: applies the recipes produced by the evidence skill to spatial data."""
 import time as _time
 
-__version__ = "0.0.5"
-_IMPORTED_AT = _time.time()      # lets selfcheck tell a stale Python session from files that are out of date
+__version__ = "0.1.0"
+_IMPORTED_AT = _time.time()      # when this Python session imported the package

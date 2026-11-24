@@ -310,15 +310,17 @@ def test_audit_reports_no_data_constant_values_and_odd_classes():
     assert any("not in the legend" in f for f in audit_data(VariableData(V.BY_ID["land_cover"], odd, "gee")).flags)
 
 
-def test_summary_keeps_groups_together_and_shows_the_role_from_the_package(pkg):
+def test_summary_keeps_groups_together_and_shows_the_role_from_the_recipes():
+    from nbs_runtime.recipes import describe_roles
+
     ctx = LoadContext(GRID, synthetic=True)
     audits = {v.id: audit_data(load_variable(v, ctx)) for v in V.CATALOG}
-    rows = summary_rows(audits, V.contract_roles(pkg), V.policy_variables(pkg, "planted_terrain_soil_v1"))
+    rows = summary_rows(audits, describe_roles())
     assert [r["group"] for r in rows] == [v.group for v in V.CATALOG]
     by_var = {r["variable"]: r for r in rows}
-    assert by_var["slope"]["role_in_ciat_package"] == "scores the index (first-pass policy)"
-    assert by_var["annual_precipitation"]["role_in_ciat_package"] == "a score in the package, not in the first-pass policy"
-    assert by_var["aridity_index"]["role_in_ciat_package"] == "not in the package"
+    assert by_var["annual_precipitation"]["role_in_recipes"] == "agroforestry/cross_family: limiting"
+    assert by_var["slope"]["role_in_recipes"].startswith("agroforestry/cross_family: modulating w=")
+    assert by_var["aridity_index"]["role_in_recipes"] == "not in any recipe"
     assert all(r["origin"] == "synthetic" for r in rows)
 
 

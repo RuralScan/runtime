@@ -1,8 +1,7 @@
 """Run configuration: everything a person decides before a run, in one place.
 
-A run is defined by a TOML file, or by a dict (the notebook's first cell). Unknown keys are an
-error, so a typo cannot silently fall back to a default. Empty decisions stay empty: the plan
-reports them as holds instead of guessing.
+A run is defined by a TOML file (config/runs/), optionally overridden by a dict (the notebook's
+parameters cell). Unknown keys are an error, so a typo cannot silently fall back to a default.
 """
 from __future__ import annotations
 
@@ -14,55 +13,46 @@ from pathlib import Path
 from typing import Any
 
 from .aoi import AOI
+from .curves import OUTSIDE
+from .rasters import WORLDCOVER_CODES
+from .recipes import WEIGHT_MODES
 
-SCALE_MODES = ("independent", "shared")
-RUN_MODES = ("policy", "exploratory")
+ELIGIBILITY_MODES = ("apply", "skip")
+FILE_ORDER = ("local", "hf")
+HF_MODES = ("stream", "download")
 
 
 @dataclass(frozen=True)
 class RunSpec:
-    nbs_id: str = "agroforestry"
-    system: str = "planted_silvoarable"
-    policy_id: str = "planted_terrain_soil_v1"
-    mode: str = "exploratory"       # "policy" needs every decision recorded; "exploratory" does not
+    nbs: str = "agroforestry"            # folder under config/recipes
+    family: str = "cross_family"         # folder under config/recipes/<nbs>
+    weights: str = "recipe"              # "recipe" (renormalised among modulating) or "equal"
+    outside: str = "unknown"             # beyond a recipe's nodes: "unknown" (not evaluated) or "clamp"
 
 
 @dataclass(frozen=True)
 class GridSpec:
-    resolution_m: int = 250
-    scenario: str = "baseline"
+    resolution_m: int = 1000
 
 
 @dataclass(frozen=True)
-class TargetSpec:
-    country: str = ""
-    applicability_decision: str = ""
+class EligibilitySpec:
+    mode: str = "apply"                  # "apply" reads land cover; "skip" treats every cell as eligible
+    classes: tuple[int, ...] = (30, 40)  # ESA WorldCover classes where the NbS can be implemented
+    min_share: float = 0.5               # a cell is eligible when at least this share of it is in `classes`
 
 
 @dataclass(frozen=True)
-class SoilSpec:
-    input_proposal: str = "planted_topsoil_0_30_v1"
-    adopted: bool = False
-    decision_reference: str = ""
-
-
-@dataclass(frozen=True)
-class MaskSpec:
-    legal_mask_spec: str = ""
-
-
-@dataclass(frozen=True)
-class SimulationSpec:
-    n_draws: int = 5000
-    seed: int = 20261103
-    scale_mode: str = "independent"
-    prior: str = "uniform"
-    weight_concentration: float = 0.0   # 0 keeps the policy weights fixed
+class SensitivitySpec:
+    n_draws: int = 300                   # Dirichlet draws of the modulating weights
+    concentration: float = 50.0          # larger keeps the draws closer to the recipe weights
+    seed: int = 20261124
 
 
 @dataclass(frozen=True)
 class DataSpec:
-    order: tuple[str, ...] = ("local", "hf", "gee")
+    order: tuple[str, ...] = ("local", "hf")    # where a dataset file is looked for, in this order
+    hf_mode: str = "stream"                     # "stream" reads only the window; "download" whole files
 
 
 @dataclass(frozen=True)
@@ -70,11 +60,8 @@ class RunConfig:
     run: RunSpec = field(default_factory=RunSpec)
     aoi: AOI = field(default_factory=AOI)
     grid: GridSpec = field(default_factory=GridSpec)
-    target: TargetSpec = field(default_factory=TargetSpec)
-    soil: SoilSpec = field(default_factory=SoilSpec)
-    masks: MaskSpec = field(default_factory=MaskSpec)
-    host_inputs: dict[str, str] = field(default_factory=dict)
-    simulation: SimulationSpec = field(default_factory=SimulationSpec)
+    eligibility: EligibilitySpec = field(default_factory=EligibilitySpec)
+    sensitivity: SensitivitySpec = field(default_factory=SensitivitySpec)
     data: DataSpec = field(default_factory=DataSpec)
 
     # ---- construction ----
@@ -85,12 +72,14 @@ class RunConfig:
         if unknown:
             raise ValueError(f"unknown config section(s): {sorted(unknown)}")
         kw: dict[str, Any] = {}
-        for name, sub in (
-            ("run", RunSpec), ("grid", GridSpec), ("target", TargetSpec), ("soil", SoilSpec),
-            ("masks", MaskSpec), ("simulation", SimulationSpec),
-        ):
+        for name, sub in (("run", RunSpec), ("grid", GridSpec), ("sensitivity", SensitivitySpec)):
             if name in d:
                 kw[name] = _build(sub, d[name], name)
+        if "eligibility" in d:
+            e = dict(d["eligibility"])
+            if "classes" in e:
+                e["classes"] = tuple(int(c) for c in e["classes"])
+            kw["eligibility"] = _build(EligibilitySpec, e, "eligibility")
         if "data" in d:
             data = dict(d["data"])
             if "order" in data:
@@ -103,8 +92,6 @@ class RunConfig:
             if "notes" in aoi:
                 aoi["notes"] = tuple(aoi["notes"])
             kw["aoi"] = _build(AOI, aoi, "aoi")
-        if "host_inputs" in d:
-            kw["host_inputs"] = {str(k): str(v) for k, v in d["host_inputs"].items()}
         return cls(**kw)
 
     @classmethod
@@ -117,6 +104,7 @@ class RunConfig:
         d = asdict(self)
         d["aoi"]["bbox"] = list(self.aoi.bbox) if self.aoi.bbox else None
         d["aoi"]["notes"] = list(self.aoi.notes)
+        d["eligibility"]["classes"] = list(self.eligibility.classes)
         d["data"]["order"] = list(self.data.order)
         return d
 
@@ -127,25 +115,36 @@ class RunConfig:
         blob = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(blob).hexdigest()
 
-    # ---- validation (problems that make a run meaningless, not open decisions) ----
+    # ---- validation (problems that make a run meaningless) ----
     def validate(self) -> list[str]:
         problems = list(self.aoi.validate())
-        if self.run.mode not in RUN_MODES:
-            problems.append(f"run.mode must be one of {RUN_MODES}")
+        r, e, s = self.run, self.eligibility, self.sensitivity
+        if not r.nbs or not r.family:
+            problems.append("run.nbs and run.family are required")
+        if r.weights not in WEIGHT_MODES:
+            problems.append(f"run.weights must be one of {WEIGHT_MODES}")
+        if r.outside not in OUTSIDE:
+            problems.append(f"run.outside must be one of {OUTSIDE}")
         if self.grid.resolution_m <= 0:
             problems.append("grid.resolution_m must be positive")
-        s = self.simulation
-        if s.n_draws < 1:
-            problems.append("simulation.n_draws must be at least 1")
-        if s.scale_mode not in SCALE_MODES:
-            problems.append(f"simulation.scale_mode must be one of {SCALE_MODES}")
-        if s.prior != "uniform":
-            problems.append("simulation.prior: only 'uniform' is implemented")
-        if s.weight_concentration < 0:
-            problems.append("simulation.weight_concentration must be 0 or positive")
-        bad = [o for o in self.data.order if o not in ("local", "hf", "gee")]
+        if e.mode not in ELIGIBILITY_MODES:
+            problems.append(f"eligibility.mode must be one of {ELIGIBILITY_MODES}")
+        if e.mode == "apply" and not e.classes:
+            problems.append("eligibility.classes is empty: no land cover would be eligible")
+        bad = [c for c in e.classes if c not in WORLDCOVER_CODES]
         if bad:
-            problems.append(f"data.order has unknown source(s): {bad}")
+            problems.append(f"eligibility.classes has codes that are not ESA WorldCover classes: {bad}")
+        if not 0 < e.min_share <= 1:
+            problems.append("eligibility.min_share must be in (0, 1]")
+        if s.n_draws < 1:
+            problems.append("sensitivity.n_draws must be at least 1")
+        if s.concentration <= 0:
+            problems.append("sensitivity.concentration must be positive")
+        bad = [o for o in self.data.order if o not in FILE_ORDER]
+        if bad:
+            problems.append(f"data.order has unknown source(s): {bad}; use {FILE_ORDER}")
+        if self.data.hf_mode not in HF_MODES:
+            problems.append(f"data.hf_mode must be one of {HF_MODES}")
         return problems
 
 
