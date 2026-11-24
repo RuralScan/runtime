@@ -26,7 +26,7 @@ dev = ["pytest", "ruff", "ty", "numpy", "ipykernel"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-nbs_runtime = ["recipe_pin.json"]
+nbs_runtime = ["recipe_pin.json", "priority_contract.json", "priority_pin.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

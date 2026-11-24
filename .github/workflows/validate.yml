@@ -10,10 +10,10 @@ jobs:
       - run: uv run ruff check .
       - run: uv run python scripts/sync_upstream.py --check
       - run: uv run pytest -q
-      - name: Check the installed recipe reader and bundled pin
+      - name: Check installed readers and bundled pins
         run: |
           uv pip install --force-reinstall --no-deps .
-          uv run --no-sync python -I -m pytest -q -o pythonpath= tests/test_recipe_release.py
+          uv run --no-sync python -I -m pytest -q -o pythonpath= tests/test_recipe_release.py tests/test_priority.py
   # the same tests again with the geospatial libraries installed, so the raster, road and figure tests run
   # instead of being skipped
   geo-tests:

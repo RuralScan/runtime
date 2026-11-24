@@ -1,0 +1,102 @@
+{
+  "config": {
+    "format": "ruralscan.priority.v1",
+    "purpose": "illustration",
+    "context": "Synthetic aligned cells",
+    "variables": [
+      {
+        "table": "T5",
+        "variable_id": "poverty_example",
+        "unit": "percent",
+        "mcda_role": "priority",
+        "concern_id": "poverty",
+        "classification_id": "poverty-illustration"
+      },
+      {
+        "table": "T2",
+        "variable_id": "flood_example",
+        "unit": "m",
+        "mcda_role": "priority",
+        "concern_id": "flood",
+        "classification_id": "flood-illustration"
+      }
+    ],
+    "rules": [
+      {
+        "classification_id": "poverty-illustration",
+        "version": "1",
+        "method": "thresholds",
+        "direction": "higher_is_more_concern",
+        "unit": "percent",
+        "context": "Hypothetical illustration; no country calibration",
+        "decision_ref": "illustrative:priority-example",
+        "missing": "unknown",
+        "cuts": [
+          0,
+          20,
+          40
+        ]
+      },
+      {
+        "classification_id": "flood-illustration",
+        "version": "1",
+        "method": "thresholds",
+        "direction": "higher_is_more_concern",
+        "unit": "m",
+        "context": "Hypothetical illustration; no country calibration",
+        "decision_ref": "illustrative:priority-example",
+        "missing": "unknown",
+        "cuts": [
+          0,
+          0.5,
+          1
+        ]
+      }
+    ],
+    "selection": {
+      "poverty": {
+        "variable": "T5:poverty_example",
+        "reason": "One poverty indicator"
+      },
+      "flood": {
+        "variable": "T2:flood_example",
+        "reason": "One flood indicator; no duplicate T5 alias"
+      }
+    },
+    "weights": {
+      "poverty": 3,
+      "flood": 1
+    }
+  },
+  "layers": {
+    "T5:poverty_example": {
+      "unit": "percent",
+      "source_ref": "synthetic:example",
+      "values": [
+        50,
+        30,
+        null,
+        50,
+        50
+      ]
+    },
+    "T2:flood_example": {
+      "unit": "m",
+      "source_ref": "synthetic:example",
+      "values": [
+        0.2,
+        2,
+        2,
+        2,
+        2
+      ]
+    }
+  },
+  "opportunity": [
+    true,
+    true,
+    true,
+    false,
+    null
+  ]
+}

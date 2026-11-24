@@ -1,0 +1,34 @@
+{
+  "format": "ruralscan.priority.v1",
+  "version": "1.0.0",
+  "class_scores": {"none": 0.0, "low": 0.33, "medium": 0.66, "high": 1.0},
+  "class_order": ["none", "low", "medium", "high"],
+  "methods": ["thresholds", "terciles"],
+  "directions": ["higher_is_more_concern", "lower_is_more_concern"],
+  "roles": ["priority", "descriptor", "investment_risk"],
+  "table_fields": {
+    "T2": {
+      "purpose": "Registry of climate-risk variables, without a composite climate-risk index.",
+      "fields": {"variable_id": "Stable variable identifier", "variable": "Canonical quantity in VONT", "dataset_id": "Context-resolved dataset in T1/BIND", "hazard_type": "Named hazard, where relevant", "scenario_type": "Baseline or stated future scenario", "unit": "Native measurement unit", "mcda_role": "Priority, descriptor or investment-risk screen", "concern_id": "Shared concern identity; do not count a T2/T5 alias twice", "classification_id": "Reference to one versioned classification rule"}
+    },
+    "T5": {
+      "purpose": "Registry of opportunity-space priorities and descriptors.",
+      "fields": {"variable_id": "Stable variable identifier", "variable": "Canonical quantity in VONT", "dataset_id": "Context-resolved dataset in T1/BIND", "theme": "Thematic grouping for interpretation", "unit": "Native measurement unit", "mcda_role": "Priority or descriptor", "concern_id": "Shared concern identity, including climate variables also present in T2", "classification_id": "Reference to one versioned classification rule"}
+    }
+  },
+  "rule_fields": {
+    "classification_id": "Stable rule identifier", "version": "Exact rule version", "method": "thresholds (default) or explicit relative terciles", "direction": "Whether higher or lower raw values mean more concern", "unit": "Must match the input measurement unit", "cuts": "Three finite strictly increasing upper bounds in native units for thresholds", "reference": "For terciles: population/area and period of the explicit reference sample", "none_condition": "For terciles: explicit no-problem condition, or null when none is not established", "context": "Geographic and substantive scope of application", "decision_ref": "Recorded justification for the rule; not an inferred approval", "missing": "unknown; missing never becomes zero"
+  },
+  "threshold_endpoint": "upper_inclusive",
+  "tercile_quantiles": [0.3333333333333333, 0.6666666666666666],
+  "tercile_interpolation": "linear_n_minus_1",
+  "tercile_ties": "preserve_equal_values; reject_collapsed_cutpoints",
+  "selection": "one_explicit_representative_per_concern_with_reason",
+  "weighting": "explicit_nonnegative_user_weights_normalised_once",
+  "missing": "complete_case_for_positive_weight_criteria",
+  "outside_opportunity_space": "excluded",
+  "unknown_opportunity_mask": "unknown",
+  "all_zero_weights": "error",
+  "post_aggregation_rescaling": "none",
+  "critic": "diagnostic_only; never automatically replaces or multiplies user weights"
+}
