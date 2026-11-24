@@ -106,3 +106,10 @@ outputs. Withdrawal provenance remains readable. Existing pinned recipe-store AP
 remain historical consumers; they do not confer AI scientific acceptance on old rows.
 This reader supplies accepted scientific values to consumers; it does not add a new
 geospatial calculation or perform fresh scientific synthesis.
+
+## Problem classes and priority weights (T2/T5)
+
+The separate [priority evaluator](docs/priority.md) applies explicit class rules and user weights to
+aligned inputs, preserving unknown values and provenance. It includes a synthetic executable example
+and CRITIC sensitivity diagnostics. It does not change the T4 suitability notebook or supply real
+country calibrations.
