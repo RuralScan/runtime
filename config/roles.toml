@@ -1,0 +1,22 @@
+# Role of each variable in the suitability index (approach 3: S = L * G * M).
+#
+#   limiting    enters L, the minimum of the limiting scores. No weight: its recipe weight is ignored.
+#               Conditions a project cannot change (in practice, climate).
+#   modulating  enters M, the weighted sum. Recipe weights are renormalised among the modulating
+#               variables of the family so that they sum to 1.
+#               Conditions a project can manage (soil, terrain, vegetation).
+#
+# [default] applies to every NbS. A table named after an NbS (the folder name under config/recipes)
+# overrides single variables for that NbS only. Every variable that has a recipe must have a role.
+
+[default]
+annual_precipitation = "limiting"
+mean_annual_temperature = "limiting"
+elevation = "limiting"            # proxy for temperature
+slope = "modulating"
+ndvi = "modulating"
+soil_ph = "modulating"
+soil_organic_carbon = "modulating"
+
+# [mangrove_restoration]
+# elevation = "modulating"
