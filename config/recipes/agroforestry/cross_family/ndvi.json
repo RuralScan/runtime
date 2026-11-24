@@ -1,0 +1,12 @@
+{
+  "practice": "agroforestry",
+  "family": "cross_family",
+  "variable": "ndvi",
+  "unit": "unitless",
+  "shape": "linear",
+  "x": [0.2, 0.35, 0.5],
+  "score": [0.25, 0.5, 0.75],
+  "valid_range": [null, null],
+  "papers": ["ahmad_2018"],
+  "upstream_commit": "217513db72e56fe547427f16eb6eb2bb369f381b"
+}

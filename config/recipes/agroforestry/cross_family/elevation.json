@@ -1,0 +1,12 @@
+{
+  "practice": "agroforestry",
+  "family": "cross_family",
+  "variable": "elevation",
+  "unit": "m",
+  "shape": "linear",
+  "x": [500.0, 750.0, 1250.0, 1750.0, 2000.0],
+  "score": [0.9, 0.75, 0.5, 0.25, 0.25],
+  "valid_range": [null, null],
+  "papers": ["chuma_2021"],
+  "upstream_commit": "217513db72e56fe547427f16eb6eb2bb369f381b"
+}

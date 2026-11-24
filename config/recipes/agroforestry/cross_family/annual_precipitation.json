@@ -1,0 +1,12 @@
+{
+  "practice": "agroforestry",
+  "family": "cross_family",
+  "variable": "annual_precipitation",
+  "unit": "mm/year",
+  "shape": "linear",
+  "x": [600.0, 700.0, 1000.0, 1200.0],
+  "score": [0.25, 0.5, 0.75, 0.9],
+  "valid_range": [null, null],
+  "papers": ["haile_2024"],
+  "upstream_commit": "217513db72e56fe547427f16eb6eb2bb369f381b"
+}
